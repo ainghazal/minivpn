@@ -20,13 +20,19 @@ var (
 
 	// ErrAlreadyStarted is returned when trying to start the tunnel more than once
 	ErrAlreadyStarted = errors.New("tunnel already started")
+
+	// ErrNotReady is returned when a Read/Write attempt is made before the tunnel is ready.
+	ErrNotReady = errors.New("tunnel not ready")
 )
 
 // tunnelInfo holds state about the VPN tunnelInfo that has longer duration than a
-// given session.
+// given session. This information is gathered at different stages:
+// - during the handshake (mtu).
+// - after server pushes config options(ip, gw).
 type tunnelInfo struct {
-	ip  string
 	mtu int
+	ip  string
+	gw  string
 }
 
 // vpnClient is a net.Conn that uses the VPN tunnel. It is a net.Conn with an
@@ -57,6 +63,11 @@ type Client struct {
 	Opts   *Options
 	Dialer DialerContext
 
+	// If this channel is not nil, a series of Event* will be
+	// sent to the channel. The user of the Client can set a
+	// channel externally to subscribe to discrete transitions.
+	EventListener chan uint16
+
 	Log Logger
 
 	conn    net.Conn
@@ -79,14 +90,23 @@ func NewClientFromOptions(opt *Options) *Client {
 	if opt == nil {
 		return &Client{}
 	}
-	if opt.Log != nil {
-		logger = opt.Log
-	}
 	return &Client{
 		Opts:    opt,
 		tunInfo: &tunnelInfo{},
 		Dialer:  &net.Dialer{},
 	}
+}
+
+//
+// observability
+//
+
+// emit sends the passed stage into any configured EventListener
+func (c *Client) emit(stage uint16) {
+	if c.EventListener == nil {
+		return
+	}
+	c.EventListener <- stage
 }
 
 // Start starts the OpenVPN tunnel.
@@ -98,21 +118,32 @@ func (c *Client) Start(ctx context.Context) error {
 }
 
 func (c *Client) start(ctx context.Context) error {
+	c.emit(EventReady)
+
 	conn, err := c.dial(ctx)
 	if err != nil {
 		return err
 	}
+
+	c.emit(EventDialDone)
+
 	muxFactory := c.muxerFactory()
 	mux, err := muxFactory(conn, c.Opts, c.tunInfo)
 	if err != nil {
 		conn.Close()
 		return err
 	}
+
+	mux.SetEventListener(c.EventListener)
+
 	err = mux.Handshake(ctx)
 	if err != nil {
 		conn.Close()
 		return err
 	}
+
+	c.emit(EventHandshakeDone)
+
 	c.conn = conn
 	c.mux = mux
 	return nil
@@ -171,7 +202,7 @@ func (c *Client) Write(b []byte) (int, error) {
 // Read reads bytes from the tunnel.
 func (c *Client) Read(b []byte) (int, error) {
 	if c.mux == nil {
-		return 0, fmt.Errorf("%w: %s", errBadInput, "nil muxer")
+		return 0, ErrNotReady
 
 	}
 	return c.mux.Read(b)
@@ -195,10 +226,14 @@ func (c *Client) LocalAddr() net.Addr {
 	return addr
 }
 
-// TODO(ainghazal): should get the remote _tunnel_ ip addr somehow
+// RemoteAddr returns the address of the tun interface of the tunnel gateway.
 func (c *Client) RemoteAddr() net.Addr {
-	logger.Errorf("client.RemoteAddr() not implemented")
-	return nil
+	if c.tunnel == nil {
+		addr, _ := net.ResolveIPAddr("ip", "")
+		return addr
+	}
+	addr, _ := net.ResolveIPAddr("ip", c.tunnel.gw)
+	return addr
 }
 
 func (c *Client) SetDeadline(t time.Time) error {

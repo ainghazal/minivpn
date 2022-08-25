@@ -35,22 +35,6 @@ func TestNewClientFromOptions(t *testing.T) {
 			t.Error("Client.NewClientFromOptions(): expected empty client with nil options")
 		}
 	})
-
-	t.Run("logger gets passed from Options", func(t *testing.T) {
-		l := &defaultLogger{}
-		globalLogger := logger
-		defer func() {
-			logger = globalLogger
-		}()
-		opts := makeTestingOptions(t, "AES-128-GCM", "sha512")
-		opts.Log = l
-		_ = NewClientFromOptions(opts)
-		if logger != l {
-			t.Errorf("logger was not overriden")
-		}
-
-	})
-
 }
 
 type mockMuxerForClient struct {
@@ -96,7 +80,7 @@ func TestClient_Read(t *testing.T) {
 	cl.mux = nil
 	b := make([]byte, 255)
 	_, err := cl.Read(b)
-	if !errors.Is(err, errBadInput) {
+	if !errors.Is(err, ErrNotReady) {
 		t.Errorf("Client.Read(): nil mux, expected error %v, got %v ", errBadInput, err)
 	}
 
@@ -126,8 +110,8 @@ func TestClient_LocalAddr(t *testing.T) {
 func TestClient_RemoteAddr(t *testing.T) {
 	cl, _ := makeTestingClientConn()
 	a := cl.RemoteAddr()
-	if a != nil {
-		t.Error("Client.RemoteAddr(): this was not implemented, please fix test")
+	if a.String() != "" {
+		t.Errorf("Client.RemoteAddr(): expected empty string, got %v", a.String())
 	}
 }
 

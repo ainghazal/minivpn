@@ -467,9 +467,8 @@ func Test_parseOption(t *testing.T) {
 	}
 }
 
-func Test_parseRemoteOptions(t *testing.T) {
+func Test_newTunnelInfoFromRemoteOptionsString(t *testing.T) {
 	type args struct {
-		tunnel     *tunnelInfo
 		remoteOpts string
 	}
 	tests := []struct {
@@ -480,7 +479,6 @@ func Test_parseRemoteOptions(t *testing.T) {
 		{
 			name: "parse good tun-mtu",
 			args: args{
-				tunnel:     &tunnelInfo{},
 				remoteOpts: "foo bar,tun-mtu 1500",
 			},
 			want: &tunnelInfo{
@@ -490,27 +488,13 @@ func Test_parseRemoteOptions(t *testing.T) {
 		{
 			name: "empty string",
 			args: args{
-				tunnel:     &tunnelInfo{mtu: 1500},
 				remoteOpts: "",
 			},
-			want: &tunnelInfo{
-				mtu: 1500,
-			},
-		},
-		{
-			name: "update value",
-			args: args{
-				tunnel:     &tunnelInfo{mtu: 1500},
-				remoteOpts: "tun-mtu 1200",
-			},
-			want: &tunnelInfo{
-				mtu: 1200,
-			},
+			want: &tunnelInfo{},
 		},
 		{
 			name: "empty field",
 			args: args{
-				tunnel:     &tunnelInfo{mtu: 1500},
 				remoteOpts: "tun-mtu 1200,,",
 			},
 			want: &tunnelInfo{
@@ -520,58 +504,54 @@ func Test_parseRemoteOptions(t *testing.T) {
 		{
 			name: "extra space",
 			args: args{
-				tunnel:     &tunnelInfo{mtu: 1500},
 				remoteOpts: "tun-mtu  1200",
 			},
-			want: &tunnelInfo{
-				mtu: 1500,
-			},
+			want: &tunnelInfo{},
 		},
 		{
 			name: "mtu not an int",
 			args: args{
-				tunnel:     &tunnelInfo{mtu: 1500},
 				remoteOpts: "tun-mtu aaa",
 			},
-			want: &tunnelInfo{
-				mtu: 1500,
-			},
+			want: &tunnelInfo{},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := parseRemoteOptions(tt.args.tunnel, tt.args.remoteOpts); !reflect.DeepEqual(got, tt.want) {
+			if got := newTunnelInfoFromRemoteOptionsString(tt.args.remoteOpts); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("parseRemoteOptions() = %v, want %v", got, tt.want)
 			}
 		})
 	}
 }
 
-func Test_parsePushedOptions(t *testing.T) {
+func Test_pushedOptionsAsMap(t *testing.T) {
 	type args struct {
 		pushedOptions []byte
 	}
 	tests := []struct {
 		name string
 		args args
-		want string
+		want map[string][]string
 	}{
 		{
 			name: "do parse tunnel ip",
-			// TODO I'm not sure about what the trailing bit should it be null?)
 			args: args{[]byte("foo bar,ifconfig 10.0.0.3,")},
-			want: "10.0.0.3",
+			want: map[string][]string{
+				"foo":      []string{"bar"},
+				"ifconfig": []string{"10.0.0.3"},
+			},
 		},
 		{
 			name: "empty string",
 			args: args{[]byte{}},
-			want: "",
+			want: map[string][]string{},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := parsePushedOptions(tt.args.pushedOptions); got != tt.want {
-				t.Errorf("parsePushedOptions() = %v, want %v", got, tt.want)
+			if got := pushedOptionsAsMap(tt.args.pushedOptions); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("pushedOptionsAsMap() = %v, want %v", got, tt.want)
 			}
 		})
 	}
