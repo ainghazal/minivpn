@@ -228,11 +228,11 @@ func (c *Client) LocalAddr() net.Addr {
 
 // RemoteAddr returns the address of the tun interface of the tunnel gateway.
 func (c *Client) RemoteAddr() net.Addr {
-	if c.tunnel == nil {
+	if c.tunInfo == nil {
 		addr, _ := net.ResolveIPAddr("ip", "")
 		return addr
 	}
-	addr, _ := net.ResolveIPAddr("ip", c.tunnel.gw)
+	addr, _ := net.ResolveIPAddr("ip", c.tunInfo.gw)
 	return addr
 }
 
