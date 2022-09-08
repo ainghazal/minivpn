@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ooni/minivpn/obfs4"
 )
 
 var (
@@ -52,11 +54,6 @@ type vpnClient interface {
 }
 
 type dialContextFn func(context.Context, string, string) (net.Conn, error)
-
-// DialerContext is anything that features a net.Dialer-like DialContext method.
-type DialerContext interface {
-	DialContext(context.Context, string, string) (net.Conn, error)
-}
 
 // Client implements the OpenVPN protocol. A Client object satisfies the
 // net.Conn interface. plus Start().
@@ -104,7 +101,6 @@ func NewClientFromOptions(opt *Options) *Client {
 	return &Client{
 		Opts:    opt,
 		tunInfo: &tunnelInfo{},
-		Dialer:  &net.Dialer{},
 	}
 }
 
@@ -206,15 +202,62 @@ func (c *Client) dial(ctx context.Context) (net.Conn, error) {
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	default:
+		// TODO(ainghazal): this message is not informative if obfuscation is set.
 		msg := fmt.Sprintf("Connecting to %s:%s with proto %s",
 			c.Opts.Remote, c.Opts.Port, strings.ToUpper(proto))
 		logger.Info(msg)
 
-		conn, err := c.Dialer.DialContext(ctx, proto, net.JoinHostPort(c.Opts.Remote, c.Opts.Port))
+		d := c.getDialer()
+		dialer, err := c.maybeWrapDialerForObfuscation(d)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %s", ErrDialError, err)
+		}
+
+		conn, err := dialer.DialContext(ctx, proto, net.JoinHostPort(c.Opts.Remote, c.Opts.Port))
 		if err != nil {
 			return nil, fmt.Errorf("%w: %s", ErrDialError, err)
 		}
 		return conn, nil
+	}
+}
+
+// getDialer returns any DialerContext that has been set up in the Dialer
+// field, or alternatively a net.Dialer instance as a fallback.
+func (c *Client) getDialer() DialerContext {
+	if c.Dialer == nil {
+		return &net.Dialer{}
+	}
+	return c.Dialer
+}
+
+// maybeWrapDialerForObfuscation checks the result of the ProxyType() method
+// call in client.Opts and, if needed, will wrap the passed dialer to use any
+// needed obfuscation proxy. It returns the possibly wrapped DialerContext and
+// any error raised during the wrapping operation.
+func (c *Client) maybeWrapDialerForObfuscation(d DialerContext) (DialerContext, error) {
+	switch c.Opts.ProxyType() {
+	case proxyOBFS4:
+		obfsNode, err := obfs4.NewProxyNodeFromURI(c.Opts.ProxyOBFS4)
+		if err != nil {
+			return nil, err
+		}
+
+		err = obfs4.Init(obfsNode)
+		if err != nil {
+			return nil, err
+		}
+		obfsDialer := obfs4.NewDialer(obfsNode)
+		// TODO allow to set ctx on DialContext -- can I remove the underlying dialer now?
+		/*
+		 obfsDialer.UnderlyingDialer = func(net, addr string) (net.Conn, error) {
+		 	return d.DialContext(context.Background(), net, addr)
+		 }
+		*/
+		return obfsDialer, nil
+	case nullProxy:
+		return d, nil
+	default:
+		return nil, ErrBadProxy
 	}
 }
 
