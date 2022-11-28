@@ -549,7 +549,6 @@ func (p *Pinger) processPacket(recv *packet, from *net.IP) error {
 	}
 
 	if pkt == nil || pkt.Data == nil {
-		fmt.Println("warn: nil icmp reply")
 		return nil
 	}
 
