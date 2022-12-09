@@ -29,6 +29,11 @@ import (
 	"golang.org/x/net/proxy"
 )
 
+var (
+	// this error can be caused for the backward-compat upgrade >= 0.0.14, if the endpoints were not updated
+	InvalidAuthError = errors.New("handshake: ntor auth mismatch")
+)
+
 type DialFunc func(string, string) (net.Conn, error)
 
 type ObfuscationDialer struct {
