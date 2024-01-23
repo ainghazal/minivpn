@@ -2,8 +2,10 @@ package networkio
 
 import (
 	"context"
+	"net"
 
 	"github.com/ooni/minivpn/internal/model"
+	"golang.org/x/net/ipv4"
 )
 
 // Dialer dials network connections. The zero value of this structure is
@@ -36,13 +38,16 @@ func (d *Dialer) DialContext(ctx context.Context, network, address string) (Fram
 
 	d.logger.Debugf("networkio: connected to %s/%s", address, network)
 
+	origConn := conn
+
 	// make sure the conn has close once semantics
 	conn = newCloseOnceConn(conn)
 
 	// wrap the conn and return
 	switch conn.LocalAddr().Network() {
 	case "udp", "udp4", "udp6":
-		return &datagramConn{conn}, nil
+		packetconn := ipv4.NewPacketConn(origConn.(*net.UDPConn))
+		return &datagramConn{conn, packetconn}, nil
 	default:
 		return &streamConn{conn}, nil
 	}

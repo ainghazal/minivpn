@@ -11,8 +11,14 @@ type FramingConn interface {
 	// ReadRawPacket reads and return a raw OpenVPN packet.
 	ReadRawPacket() ([]byte, error)
 
+	// ReadRawPacket reads and return several raw OpenVPN packets.
+	ReadRawPackets() ([][]byte, error)
+
 	// WriteRawPacket writes a raw OpenVPN packet.
 	WriteRawPacket(pkt []byte) error
+
+	// WriteRawPackets writes several raw OpenVPN packet.
+	WriteRawPackets(pkts [][]byte) error
 
 	// SetReadDeadline is like net.Conn.SetReadDeadline.
 	SetReadDeadline(t time.Time) error

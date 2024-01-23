@@ -32,6 +32,8 @@ func startWorkers(logger model.Logger, sessionManager *session.Manager,
 
 	// create the networkio service.
 	nio := &networkio.Service{
+		// TODO: temporarily buffer this channel
+		// MuxerToNetwork: make(chan []byte, 1<<32),
 		MuxerToNetwork: make(chan []byte),
 		NetworkToMuxer: nil,
 	}

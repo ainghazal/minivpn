@@ -78,17 +78,24 @@ func (ws *workersState) moveUpWorker() {
 
 	for {
 		// POSSIBLY BLOCK on the connection to read a new packet
-		pkt, err := ws.conn.ReadRawPacket()
+		// pkt, err := ws.conn.ReadRawPacket()
+		pkts, err := ws.conn.ReadRawPackets()
 		if err != nil {
 			ws.logger.Debugf("%s: ReadRawPacket: %s", workerName, err.Error())
 			return
 		}
 
 		// POSSIBLY BLOCK on the channel to deliver the packet
-		select {
-		case ws.networkToMuxer <- pkt:
-		case <-ws.manager.ShouldShutdown():
-			return
+		for _, pkt := range pkts {
+			if pkt == nil {
+				continue
+			}
+			select {
+			case ws.networkToMuxer <- pkt:
+			case <-ws.manager.ShouldShutdown():
+				return
+			}
+
 		}
 	}
 }
@@ -108,13 +115,34 @@ func (ws *workersState) moveDownWorker() {
 	ws.logger.Debugf("%s: started", workerName)
 
 	for {
+
 		// POSSIBLY BLOCK when receiving from channel.
+
 		select {
+
 		case pkt := <-ws.muxerToNetwork:
-			// POSSIBLY BLOCK on the connection to write the packet
-			if err := ws.conn.WriteRawPacket(pkt); err != nil {
-				ws.logger.Infof("%s: WriteRawPacket: %s", workerName, err.Error())
-				return
+			if len(ws.muxerToNetwork) == 0 {
+				// POSSIBLY BLOCK on the connection to write the packet
+				if err := ws.conn.WriteRawPacket(pkt); err != nil {
+					ws.logger.Infof("%s: WriteRawPacket: %s", workerName, err.Error())
+					return
+				}
+			} else {
+				packets := make([][]byte, 0)
+				packets = append(packets, pkt)
+
+				for i := 0; len(ws.muxerToNetwork) != 0; i++ {
+					//fmt.Println(">> append packet, len", len(packets))
+					pkt := <-ws.muxerToNetwork
+					packets = append(packets, pkt)
+					if len(ws.muxerToNetwork) == 0 {
+						break
+					}
+				}
+				if err := ws.conn.WriteRawPackets(packets); err != nil {
+					ws.logger.Infof("%s: WriteRawPackets: %s", workerName, err.Error())
+					return
+				}
 			}
 
 		case <-ws.manager.ShouldShutdown():

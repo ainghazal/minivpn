@@ -192,6 +192,7 @@ func (ws *workersState) handleRawPacket(rawPacket []byte) error {
 	packet, err := model.ParsePacket(rawPacket)
 	if err != nil {
 		ws.logger.Warnf("packetmuxer: moveUpWorker: ParsePacket: %s", err.Error())
+		ws.logger.Warnf("len: %v", len(packet.Payload))
 		return nil // keep running
 	}
 

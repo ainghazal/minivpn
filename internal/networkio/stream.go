@@ -29,6 +29,10 @@ func (c *streamConn) ReadRawPacket() ([]byte, error) {
 	return buf, nil
 }
 
+func (c *streamConn) ReadRawPackets() ([][]byte, error) {
+	return nil, nil
+}
+
 // ErrPacketTooLarge means that a packet is larger than [math.MaxUint16].
 var ErrPacketTooLarge = errors.New("openvpn: packet too large")
 
@@ -42,4 +46,8 @@ func (c *streamConn) WriteRawPacket(pkt []byte) error {
 	pkt = append(length, pkt...)
 	_, err := c.Conn.Write(pkt)
 	return err
+}
+
+func (c *streamConn) WriteRawPackets(pkt [][]byte) error {
+	return nil
 }
