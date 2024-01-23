@@ -45,9 +45,9 @@ type Service struct {
 // eventually BLOCKS on tunUp to deliver it;
 //
 // 2. moveDownWorker BLOCKS on tunDown to read a packet and
-// eventually BLOCKS on packetDown to deliver it;
+// eventually BLOCKS on dataOrControlToMuxer to deliver it;
 //
-// 3. keyWorker BLOCKS on keyUp to read an dataChannelKey and
+// 3. keyWorker BLOCKS on keyUp to read a dataChannelKey and
 // initializes the internal state with the resulting key;
 func (s *Service) StartWorkers(
 	logger model.Logger,
@@ -61,15 +61,15 @@ func (s *Service) StartWorkers(
 		return
 	}
 	ws := &workersState{
+		dataChannel:          dc,
 		dataOrControlToMuxer: *s.DataOrControlToMuxer,
 		dataToTUN:            s.DataToTUN,
+		keyReady:             s.KeyReady,
 		logger:               logger,
 		muxerToData:          s.MuxerToData,
-		tunToData:            s.TUNToData,
-		keyReady:             s.KeyReady,
-		dataChannel:          dc,
-		workersManager:       workersManager,
 		sessionManager:       sessionManager,
+		tunToData:            s.TUNToData,
+		workersManager:       workersManager,
 	}
 
 	firstKeyReady := make(chan any)
@@ -81,15 +81,15 @@ func (s *Service) StartWorkers(
 
 // workersState contains the data channel state.
 type workersState struct {
-	logger               model.Logger
-	workersManager       *workers.Manager
-	sessionManager       *session.Manager
-	keyReady             <-chan *session.DataChannelKey
-	muxerToData          <-chan *model.Packet
+	dataChannel          *DataChannel
 	dataOrControlToMuxer chan<- *model.Packet
 	dataToTUN            chan<- []byte
+	keyReady             <-chan *session.DataChannelKey
+	logger               model.Logger
+	muxerToData          <-chan *model.Packet
+	sessionManager       *session.Manager
 	tunToData            <-chan []byte
-	dataChannel          *DataChannel
+	workersManager       *workers.Manager
 }
 
 // moveDownWorker moves packets down the stack. It will BLOCK on PacketDown
@@ -118,8 +118,6 @@ func (ws *workersState) moveDownWorker(firstKeyReady <-chan any) {
 
 				select {
 				case ws.dataOrControlToMuxer <- packet:
-				default:
-				// drop the packet if the buffer is full
 				case <-ws.workersManager.ShouldShutdown():
 					return
 				}
@@ -163,6 +161,7 @@ func (ws *workersState) moveUpWorker() {
 				continue
 			}
 
+			// POSSIBLY BLOCK writing up towards TUN
 			ws.dataToTUN <- decrypted
 		case <-ws.workersManager.ShouldShutdown():
 			return
