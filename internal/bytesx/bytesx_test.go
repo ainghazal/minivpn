@@ -11,6 +11,7 @@ package bytesx
 
 import (
 	"errors"
+	"math"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -156,4 +157,257 @@ func Test_DecodeOptionStringFromBytes(t *testing.T) {
 			}
 		})
 	}
+}
+
+func Test_BytesUnpadPKCS7(t *testing.T) {
+	type args struct {
+		b         []byte
+		blockSize int
+	}
+	tests := []struct {
+		name    string
+		args    args
+		want    []byte
+		wantErr error
+	}{{
+		name: "with too-large blockSize",
+		args: args{
+			b:         []byte{0x00, 0x00, 0x00},
+			blockSize: math.MaxUint8 + 1, // too large
+		},
+		want:    nil,
+		wantErr: ErrUnpaddingPKCS7,
+	}, {
+		name: "with zero-length array",
+		args: args{
+			b:         nil,
+			blockSize: 2,
+		},
+		want:    nil,
+		wantErr: ErrUnpaddingPKCS7,
+	}, {
+		name: "with 0x00 used as padding",
+		args: args{
+			b: []byte{
+				0x61, 0x61, // block ("aa")
+				0x00, 0x00, // padding
+			},
+			blockSize: 2,
+		},
+		want:    nil,
+		wantErr: ErrUnpaddingPKCS7,
+	}, {
+		name: "with padding larger than block size",
+		args: args{
+			b: []byte{
+				0x61, 0x61, // block ("aa")
+				0x03, 0x03, // padding
+			},
+			blockSize: 2,
+		},
+		want:    nil,
+		wantErr: ErrUnpaddingPKCS7,
+	}, {
+		name: "with blocksize == 4 and len(data) == 0",
+		args: args{
+			b: []byte{
+				0x04, 0x04, 0x04, 0x04, // padding
+			},
+			blockSize: 4,
+		},
+		want:    []byte{},
+		wantErr: nil,
+	}, {
+		name: "with blocksize == 4 and len(data) == 1",
+		args: args{
+			b: []byte{
+				0xde,             // data
+				0x03, 0x03, 0x03, // padding
+			},
+			blockSize: 4,
+		},
+		want:    []byte{0xde},
+		wantErr: nil,
+	}, {
+		name: "with blocksize == 4 and len(data) == 2",
+		args: args{
+			b: []byte{
+				0xde, 0xad, // data
+				0x02, 0x02, // padding
+			},
+			blockSize: 4,
+		},
+		want:    []byte{0xde, 0xad},
+		wantErr: nil,
+	}, {
+		name: "with blocksize == 4 and len(data) == 3",
+		args: args{
+			b: []byte{
+				0xde, 0xad, 0xbe, // data
+				0x01, // padding
+			},
+			blockSize: 4,
+		},
+		want:    []byte{0xde, 0xad, 0xbe},
+		wantErr: nil,
+	}, {
+		name: "with blocksize == 4 and len(data) == 4",
+		args: args{
+			b: []byte{
+				0xde, 0xad, 0xbe, 0xff, // data
+				0x04, 0x04, 0x04, 0x04, // padding
+			},
+			blockSize: 4,
+		},
+		want:    []byte{0xde, 0xad, 0xbe, 0xff},
+		wantErr: nil,
+	}, {
+		name: "with blocksize == 4 and len(data) == 5",
+		args: args{
+			b: []byte{
+				0xde, 0xad, 0xbe, 0xff, 0xab, // data
+				0x03, 0x03, 0x03, // padding
+			},
+			blockSize: 4,
+		},
+		want:    []byte{0xde, 0xad, 0xbe, 0xff, 0xab},
+		wantErr: nil,
+	}}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := BytesUnpadPKCS7(tt.args.b, tt.args.blockSize)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("bytesUnpadPKCS7() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if diff := cmp.Diff(tt.want, got); diff != "" {
+				t.Fatal(diff)
+			}
+		})
+	}
+}
+
+func Test_BytesPadPKCS7(t *testing.T) {
+	type args struct {
+		b         []byte
+		blockSize int
+	}
+	tests := []struct {
+		name    string
+		args    args
+		want    []byte
+		wantErr error
+	}{{
+		name: "with too-large block size",
+		args: args{
+			b:         []byte{0x00, 0x00, 0x00},
+			blockSize: math.MaxUint8 + 1,
+		},
+		want:    nil,
+		wantErr: ErrPaddingPKCS7,
+	},
+		{
+			name: "with blockSize == 4 and len(data) == 0",
+			args: args{
+				b:         nil,
+				blockSize: 4,
+			},
+			want: []byte{
+				0x04, 0x04, 0x04, 0x04, // only padding
+			},
+			wantErr: nil,
+		}, {
+			name: "with blockSize == 4 and len(data) == 1",
+			args: args{
+				b: []byte{
+					0xde, // len(data) == 1
+				},
+				blockSize: 4,
+			},
+			want: []byte{
+				0xde,             // data
+				0x03, 0x03, 0x03, // padding
+			},
+			wantErr: nil,
+		}, {
+			name: "with blockSize == 4 and len(data) == 2",
+			args: args{
+				b: []byte{
+					0xde, 0xad, // len(data) == 2
+				},
+				blockSize: 4,
+			},
+			want: []byte{
+				0xde, 0xad, // data
+				0x02, 0x02, // padding
+			},
+			wantErr: nil,
+		}, {
+			name: "with blockSize == 4 and len(data) == 3",
+			args: args{
+				b: []byte{
+					0xde, 0xad, 0xbe, // len(data) == 3
+				},
+				blockSize: 4,
+			},
+			want: []byte{
+				0xde, 0xad, 0xbe, //data
+				0x01, // padding
+			},
+			wantErr: nil,
+		}, {
+			name: "with blockSize == 4 and len(data) == 4",
+			args: args{
+				b: []byte{
+					0xde, 0xad, 0xbe, 0xef, // len(data) == 4
+				},
+				blockSize: 4,
+			},
+			want: []byte{
+				0xde, 0xad, 0xbe, 0xef, // data
+				0x04, 0x04, 0x04, 0x04, // padding
+			},
+			wantErr: nil,
+		}, {
+			name: "with blocksize == 4 and len(data) == 5",
+			args: args{
+				b: []byte{
+					0xde, 0xad, 0xbe, 0xef, 0xab, // len(data) == 5
+				},
+				blockSize: 4,
+			},
+			want: []byte{
+				0xde, 0xad, 0xbe, 0xef, 0xab, // data
+				0x03, 0x03, 0x03, // padding
+			},
+			wantErr: nil,
+		}}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := BytesPadPKCS7(tt.args.b, tt.args.blockSize)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("bytesPadPKCS7() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if diff := cmp.Diff(tt.want, got); diff != "" {
+				t.Fatal(diff)
+			}
+		})
+	}
+}
+
+// Regression test for MIV-01-002
+func Test_Crash_bytesPadPCKS7(t *testing.T) {
+	// we want to panic and crash because a zero or negative block size should not
+	// be controllable by the user. if this happens, we have a seriously misconfigured
+	// data channel cipher.
+	assertPanic(t, func() { BytesPadPKCS7(nil, 0) })
+	assertPanic(t, func() { BytesPadPKCS7([]byte{0xaa, 0xab}, -1) })
+}
+
+func assertPanic(t *testing.T, f func()) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Errorf("expected code to panic")
+		}
+	}()
+	f()
 }
