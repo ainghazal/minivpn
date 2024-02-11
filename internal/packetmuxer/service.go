@@ -2,6 +2,7 @@
 package packetmuxer
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"time"
@@ -130,6 +131,11 @@ func (ws *workersState) moveUpWorker() {
 		// POSSIBLY BLOCK awaiting for incoming raw packet
 		select {
 		case rawPacket := <-ws.networkToMuxer:
+			magic := []byte{0xde, 0xad, 0xbe, 0xef}
+			if bytes.Equal(rawPacket[0:4], magic) {
+				ws.logger.Debug("Got magic header")
+				rawPacket = rawPacket[4:]
+			}
 			if err := ws.handleRawPacket(rawPacket); err != nil {
 				// error already printed
 				return
