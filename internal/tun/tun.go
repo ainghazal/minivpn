@@ -45,6 +45,8 @@ func StartTUN(ctx context.Context, conn networkio.FramingConn, config *model.Con
 	// (i.e., three way handshake has completed, and we have valid keys).
 
 	select {
+	case failure := <-sessionManager.Failed:
+		return nil, failure.Error()
 	case <-sessionManager.Ready:
 		return tunnel, nil
 	case <-tlsTimeout.C:

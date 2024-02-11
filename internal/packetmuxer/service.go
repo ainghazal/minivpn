@@ -2,7 +2,6 @@
 package packetmuxer
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"time"
@@ -131,14 +130,23 @@ func (ws *workersState) moveUpWorker() {
 		// POSSIBLY BLOCK awaiting for incoming raw packet
 		select {
 		case rawPacket := <-ws.networkToMuxer:
-			magic := []byte{0xde, 0xad, 0xbe, 0xef}
-			if bytes.Equal(rawPacket[0:4], magic) {
-				ws.logger.Debug("Got magic header")
-				rawPacket = rawPacket[4:]
-			}
+			/*
+				magic := []byte{0xde, 0xad, 0xbe, 0xef}
+				if bytes.Equal(rawPacket[0:4], magic) {
+					ws.logger.Debug("Got magic header")
+					rawPacket = rawPacket[4:]
+				}
+			*/
 			if err := ws.handleRawPacket(rawPacket); err != nil {
 				// error already printed
-				return
+				// TODO: should capture unparseable packets, like this:
+				/*
+					ws.tracer.OnBadRawPacket(
+						model.DirectionIncoming,
+						int(ws.sessionManager.NegotiationState()),
+						rawPacket)
+				*/
+				continue
 			}
 
 		case <-ws.hardResetTicker.C:
@@ -249,6 +257,7 @@ func (ws *workersState) handleRawPacket(rawPacket []byte) error {
 			// connection in the client side should pick a different port,
 			// so that data sent from previous sessions will not be delivered.
 			// However, it does not harm to be defensive here.
+			ws.logger.Warn("packetmuxer: moveUpWorker: not ready to handle data")
 			return errors.New("not ready to handle data")
 		}
 		select {

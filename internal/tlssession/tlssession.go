@@ -121,9 +121,11 @@ func (ws *workersState) tlsAuth() error {
 
 	select {
 	case err := <-errorch:
+		fmt.Println("error here")
 		return err
 
 	case <-ws.workersManager.ShouldShutdown():
+		fmt.Println("should shutodwn")
 		return workers.ErrShutdown
 	}
 }

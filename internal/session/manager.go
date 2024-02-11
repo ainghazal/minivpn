@@ -71,6 +71,14 @@ func (sns SessionNegotiationState) String() string {
 	}
 }
 
+type Failure struct {
+	err error
+}
+
+func (f *Failure) Error() error {
+	return f.err
+}
+
 // Manager manages the session. The zero value is invalid. Please, construct
 // using [NewManager]. This struct is concurrency safe.
 type Manager struct {
@@ -88,7 +96,8 @@ type Manager struct {
 
 	// Ready is a channel where we signal that we can start accepting data, because we've
 	// successfully generated key material for the data channel.
-	Ready chan any
+	Ready  chan any
+	Failed chan *Failure
 }
 
 // NewManager returns a [Manager] ready to be used.
@@ -111,7 +120,8 @@ func NewManager(config *model.Config) (*Manager, error) {
 		// the data packet ID counter to zero.
 		localDataPacketID: 1,
 
-		Ready: make(chan any),
+		Ready:  make(chan any),
+		Failed: make(chan *Failure),
 	}
 
 	randomBytes, err := randomFn(8)
