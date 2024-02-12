@@ -125,3 +125,38 @@ func Test_UDPLikeConn(t *testing.T) {
 		}
 	})
 }
+
+func Test_CloseOnceConn(t *testing.T) {
+	t.Run("A conn can be closed more than once", func(t *testing.T) {
+		ctr := 0
+		testDialer := &vpntest.Dialer{
+			MockDialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+				conn := &vpntest.Conn{
+					MockClose: func() error {
+						ctr++
+						return nil
+					},
+					MockLocalAddr: func() net.Addr {
+						addr := &vpntest.Addr{
+							MockString:  func() string { return "1.2.3.4" },
+							MockNetwork: func() string { return network },
+						}
+						return addr
+					},
+				}
+				return conn, nil
+			},
+		}
+
+		dialer := NewDialer(log.Log, testDialer)
+		framingConn, err := dialer.DialContext(context.Background(), "tcp", "1.1.1.1")
+		if err != nil {
+			t.Errorf("should not error getting a framingConn")
+		}
+		framingConn.Close()
+		framingConn.Close()
+		if ctr != 1 {
+			t.Errorf("close function should be called only once")
+		}
+	})
+}
