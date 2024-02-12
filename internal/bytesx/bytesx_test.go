@@ -10,7 +10,9 @@
 package bytesx
 
 import (
+	"bytes"
 	"errors"
+	"io"
 	"math"
 	"testing"
 
@@ -410,4 +412,130 @@ func assertPanic(t *testing.T, f func()) {
 		}
 	}()
 	f()
+}
+
+func TestReadUint32(t *testing.T) {
+	type args struct {
+		buf *bytes.Buffer
+	}
+	tests := []struct {
+		name    string
+		args    args
+		want    uint32
+		wantErr error
+	}{
+		{
+			name:    "empty buffer raises EOF",
+			args:    args{&bytes.Buffer{}},
+			want:    0,
+			wantErr: io.EOF,
+		},
+		{
+			name:    "buffer reads 1",
+			args:    args{bytes.NewBuffer([]byte{0x00, 0x00, 0x00, 0x01})},
+			want:    1,
+			wantErr: nil,
+		},
+		{
+			name:    "0xffffffff",
+			args:    args{bytes.NewBuffer([]byte{0xff, 0xff, 0xff, 0xff})},
+			want:    4294967295,
+			wantErr: nil,
+		},
+		{
+			name:    "read only 4 if the buffer is bigger",
+			args:    args{bytes.NewBuffer([]byte{0x00, 0x000, 0x00, 0x01, 0xff})},
+			want:    1,
+			wantErr: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ReadUint32(tt.args.buf)
+			if !errors.Is(err, tt.wantErr) {
+				t.Errorf("ReadUint32() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("ReadUint32() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestWriteUint32(t *testing.T) {
+	type args struct {
+		buf *bytes.Buffer
+		val uint32
+	}
+	tests := []struct {
+		name string
+		args args
+		want []byte
+	}{
+		{
+			name: "empty value gets 4 zeroes appended",
+			args: args{
+				buf: bytes.NewBuffer([]byte{}),
+				val: 0,
+			},
+			want: []byte{0x00, 0x00, 0x00, 0x00},
+		},
+		{
+			name: "append 1 to an existing buffer",
+			args: args{
+				buf: bytes.NewBuffer([]byte{0xff}),
+				val: 1,
+			},
+			want: []byte{0xff, 0x00, 0x00, 0x00, 0x01},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			WriteUint32(tt.args.buf, tt.args.val)
+			got := tt.args.buf.Bytes()
+			if !bytes.Equal(got, tt.want) {
+				t.Errorf("WriteUint32(); got = %v, want = %v", got, tt.want)
+
+			}
+		})
+	}
+}
+
+func TestWriteUint24(t *testing.T) {
+	type args struct {
+		buf *bytes.Buffer
+		val uint32
+	}
+	tests := []struct {
+		name string
+		args args
+		want []byte
+	}{
+		{
+			name: "empty value gets 3 zeroes appended",
+			args: args{
+				buf: bytes.NewBuffer([]byte{}),
+				val: 0,
+			},
+			want: []byte{0x00, 0x00, 0x00},
+		},
+		{
+			name: "append 1 to an existing buffer",
+			args: args{
+				buf: bytes.NewBuffer([]byte{0xff}),
+				val: 1,
+			},
+			want: []byte{0xff, 0x00, 0x00, 0x01},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			WriteUint24(tt.args.buf, tt.args.val)
+			got := tt.args.buf.Bytes()
+			if !bytes.Equal(got, tt.want) {
+				t.Errorf("WriteUint24(); got = %v, want = %v", got, tt.want)
+			}
+		})
+	}
 }
