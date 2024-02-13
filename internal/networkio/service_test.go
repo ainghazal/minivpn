@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/apex/log"
+	"github.com/ooni/minivpn/internal/model"
 	"github.com/ooni/minivpn/internal/runtimex"
 	"github.com/ooni/minivpn/internal/workers"
 )
@@ -41,7 +42,7 @@ func TestService_StartStopWorkers(t *testing.T) {
 		NetworkToMuxer: &networkToMuxer,
 	}
 
-	s.StartWorkers(log.Log, workersManager, framingConn)
+	s.StartWorkers(model.NewConfig(model.WithLogger(log.Log)), workersManager, framingConn)
 	got := <-networkToMuxer
 
 	//time.Sleep(time.Millisecond * 10)
