@@ -44,6 +44,9 @@ func NewDataChannelFromOptions(logger model.Logger,
 	sessionManager *session.Manager) (*DataChannel, error) {
 	runtimex.Assert(opt != nil, "openvpn datachannel: opts cannot be nil")
 	runtimex.Assert(opt != nil, "openvpn datachannel: opts cannot be nil")
+	if err := opt.Validate(); err != nil {
+		return nil, err
+	}
 	runtimex.Assert(len(opt.Cipher) != 0, "need a configured cipher option")
 	runtimex.Assert(len(opt.Auth) != 0, "need a configured auth option")
 

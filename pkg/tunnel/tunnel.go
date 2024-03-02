@@ -24,6 +24,10 @@ type TUN = tun.TUN
 // that can later be stopped. In case there was any error during the initialization of the tunnel,
 // they will also be returned by this function.
 func Start(ctx context.Context, underlyingDialer SimpleDialer, cfg *config.Config) (*TUN, error) {
+	// do we have a valid configuration? abort if not.
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
 	dialer := networkio.NewDialer(cfg.Logger(), underlyingDialer)
 	conn, err := dialer.DialContext(ctx, cfg.Remote().Protocol, cfg.Remote().Endpoint)
 	if err != nil {

@@ -123,6 +123,38 @@ func TestGetOptionsFromLines(t *testing.T) {
 			t.Errorf("Expected compression empty")
 		}
 	})
+	t.Run("can parse auth in lowercase", func(t *testing.T) {
+		d := t.TempDir()
+		l := []string{
+			"auth sha512",
+		}
+		writeDummyCertFiles(d)
+		opt, err := getOptionsFromLines(l, d)
+		if err != nil {
+			t.Error("Expected null error")
+		}
+		wantAuth := "SHA512"
+		if opt.Auth != wantAuth {
+			t.Errorf("expected auth=%v, got %v", wantAuth, opt.Auth)
+
+		}
+	})
+	t.Run("can parse a cipher in lowercase", func(t *testing.T) {
+		d := t.TempDir()
+		l := []string{
+			"cipher aes-256-gcm",
+		}
+		writeDummyCertFiles(d)
+		opt, err := getOptionsFromLines(l, d)
+		if err != nil {
+			t.Error("Expected null error")
+		}
+		wantCipher := "AES-256-GCM"
+		if opt.Cipher != wantCipher {
+			t.Errorf("expected cipher=%v, got %v", wantCipher, opt.Cipher)
+
+		}
+	})
 }
 
 func TestGetOptionsFromLinesInlineCerts(t *testing.T) {

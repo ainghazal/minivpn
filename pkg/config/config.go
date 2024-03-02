@@ -29,9 +29,20 @@ func NewConfig(options ...Option) (*Config, error) {
 		tracer:         &model.DummyTracer{},
 	}
 	for _, opt := range options {
-		opt(cfg)
+		if err := opt(cfg); err != nil {
+			return cfg, err
+		}
 	}
 	return cfg, nil
+}
+
+// Validate will perform sanity checks on the configuration, and raise any error that will avoid
+// to establish a connnection.
+func (c *Config) Validate() error {
+	if err := c.openvpnOptions.Validate(); err != nil {
+		return err
+	}
+	return nil
 }
 
 // Option is an option you can pass to initialize minivpn. It will return any error

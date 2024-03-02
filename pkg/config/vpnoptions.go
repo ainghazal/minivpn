@@ -167,7 +167,20 @@ func (opt *OpenVPNOptions) Merge(target *OpenVPNOptions) *OpenVPNOptions {
 		}
 	}
 	return opts
+}
 
+// Validate performs sanity check on an OpenVPNOptions object, and will raise an error if it does not contain
+// all the parameters needed to initiate a connection.
+func (opts *OpenVPNOptions) Validate() error {
+	if !hasElement(opts.Cipher, SupportedCiphers) {
+		return fmt.Errorf("%w: unsupported cipher: %s", ErrBadConfig, opts.Cipher)
+	}
+	if !hasElement(opts.Auth, SupportedAuth) {
+		return fmt.Errorf("%w: unsupported auth: %s", ErrBadConfig, opts.Auth)
+	}
+	// TODO(ainghazal): check authentication info/certificates, expiration etc.
+	// TODO(ainghazal): validate the obfs4://... scheme here
+	return nil
 }
 
 // ReadConfigFile expects a string with a path to a valid config file,
@@ -258,12 +271,13 @@ func parseRemote(p []string, o *OpenVPNOptions) (*OpenVPNOptions, error) {
 	return o, nil
 }
 
+// parseCipher parses the legacy --cipher option (single option)
 func parseCipher(p []string, o *OpenVPNOptions) (*OpenVPNOptions, error) {
 	// TODO(ainhazal): clone and modify
 	if len(p) != 1 {
 		return o, fmt.Errorf("%w: %s", ErrBadConfig, "cipher expects one arg")
 	}
-	cipher := p[0]
+	cipher := strings.ToUpper(p[0])
 	if !hasElement(cipher, SupportedCiphers) {
 		return o, fmt.Errorf("%w: unsupported cipher: %s", ErrBadConfig, cipher)
 	}
@@ -271,12 +285,31 @@ func parseCipher(p []string, o *OpenVPNOptions) (*OpenVPNOptions, error) {
 	return o, nil
 }
 
+// parseDataCiphers parses the newer --data-ciphers option, which is a colon-separated list
+// of ciphers to negotiate. minivpn does not implement negotiation, so we will pick the first element
+// in the list.
+func parseDataCiphers(p []string, o *OpenVPNOptions) (*OpenVPNOptions, error) {
+	// TODO(ainhazal): clone and modify
+	if len(p) != 1 {
+		return o, fmt.Errorf("%w: %s", ErrBadConfig, "data-ciphers expects one arg")
+	}
+	ciphers := strings.Split(strings.ToUpper(p[0]), ":")
+	for _, c := range ciphers {
+		o, err := parseCipher([]string{c}, o)
+		if err == nil {
+			return o, nil
+		}
+	}
+	return o, fmt.Errorf("%w: %s", ErrBadConfig, "cannot parse data-ciphers")
+
+}
+
 func parseAuth(p []string, o *OpenVPNOptions) (*OpenVPNOptions, error) {
 	// TODO(ainhazal): clone and modify
 	if len(p) != 1 {
 		return o, fmt.Errorf("%w: %s", ErrBadConfig, "invalid auth entry")
 	}
-	auth := p[0]
+	auth := strings.ToUpper(p[0])
 	if !hasElement(auth, SupportedAuth) {
 		return o, fmt.Errorf("%w: unsupported auth: %s", ErrBadConfig, auth)
 	}
@@ -419,7 +452,6 @@ func parseProxyOBFS4(p []string, o *OpenVPNOptions) (*OpenVPNOptions, error) {
 	if len(p) != 1 {
 		return o, fmt.Errorf("%w: %s", ErrBadConfig, "proto-obfs4: need a properly configured proxy")
 	}
-	// TODO(ainghazal): can validate the obfs4://... scheme here
 	o.ProxyOBFS4 = p[0]
 	return o, nil
 }
@@ -428,6 +460,7 @@ var pMap = map[string]interface{}{
 	"proto":           parseProto,
 	"remote":          parseRemote,
 	"cipher":          parseCipher,
+	"data-ciphers":    parseDataCiphers,
 	"auth":            parseAuth,
 	"compress":        parseCompress,
 	"comp-lzo":        parseCompLZO,
@@ -445,7 +478,7 @@ var pMapDir = map[string]interface{}{
 
 func parseOption(opt *OpenVPNOptions, dir, key string, p []string, lineno int) (*OpenVPNOptions, error) {
 	switch key {
-	case "proto", "remote", "cipher", "auth", "compress", "comp-lzo", "tls-version-max", "proxy-obfs4":
+	case "proto", "remote", "cipher", "data-ciphers", "auth", "compress", "comp-lzo", "tls-version-max", "proxy-obfs4":
 		fn := pMap[key].(func([]string, *OpenVPNOptions) (*OpenVPNOptions, error))
 		if updatedOpt, e := fn(p, opt); e != nil {
 			return updatedOpt, e
