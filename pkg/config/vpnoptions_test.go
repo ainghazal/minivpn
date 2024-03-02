@@ -6,6 +6,8 @@ import (
 	fp "path/filepath"
 	"reflect"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 func writeDummyCertFiles(d string) {
@@ -823,6 +825,53 @@ func TestOpenVPNOptions_HasAuthInfo(t *testing.T) {
 		opt := OpenVPNOptions{}
 		if opt.HasAuthInfo() {
 			t.Error("expected false")
+		}
+	})
+}
+
+func TestOpenVPNOptions_Clone(t *testing.T) {
+	t.Run("a clone should return a different object with equal values", func(t *testing.T) {
+		opt := &OpenVPNOptions{
+			Remote: "1.1.1.1",
+			Port:   "1194",
+			Proto:  ProtoUDP,
+		}
+		cloned := opt.Clone()
+		if opt == cloned {
+			t.Error("cloned should not have equal address")
+		}
+		if diff := cmp.Diff(opt, cloned); diff != "" {
+			t.Error(diff)
+		}
+	})
+}
+
+func TestOpenVPNOptions_Merge(t *testing.T) {
+	t.Run("a merge should replace zero values from source", func(t *testing.T) {
+		src := &OpenVPNOptions{
+			Remote: "1.1.1.1",
+			Port:   "1194",
+			Proto:  ProtoUDP,
+		}
+		target := &OpenVPNOptions{
+			Username: "user",
+			Password: "password",
+		}
+		merged := src.Merge(target)
+		if merged.Remote != src.Remote {
+			t.Errorf("expected remote=%v, got %v", src.Remote, merged.Remote)
+		}
+		if merged.Port != src.Port {
+			t.Errorf("expected port=%v, got %v", src.Port, merged.Port)
+		}
+		if merged.Proto != src.Proto {
+			t.Errorf("expected proto=%v, got %v", src.Proto, merged.Proto)
+		}
+		if merged.Username != target.Username {
+			t.Errorf("expected username=%v, got %v", target.Username, merged.Username)
+		}
+		if merged.Password != target.Password {
+			t.Errorf("expected password=%v, got %v", target.Password, merged.Password)
 		}
 	})
 }

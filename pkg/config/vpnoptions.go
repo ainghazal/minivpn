@@ -37,6 +37,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 
 	"github.com/ooni/minivpn/internal/runtimex"
@@ -98,26 +99,75 @@ var SupportedAuth = []string{
 // different modules that need it.
 type OpenVPNOptions struct {
 	// These options have the same name of OpenVPN options referenced in the official documentation:
-	Remote    string
-	Port      string
-	Proto     Proto
-	Username  string
-	Password  string
-	CAPath    string
-	CertPath  string
-	KeyPath   string
-	CA        []byte
-	Cert      []byte
-	Key       []byte
-	Cipher    string
-	Auth      string
-	TLSMaxVer string
+	Remote      string
+	Port        string
+	Proto       Proto
+	Username    string
+	Password    string
+	CAPath      string
+	CertPath    string
+	KeyPath     string
+	TLSAuthPath string
+	CA          []byte
+	Cert        []byte
+	Key         []byte
+	TLSAuth     []byte
+	Cipher      string
+	Auth        string
+	TLSMaxVer   string
 
 	// Below are options that do not conform strictly to the OpenVPN configuration format, but still can
 	// be understood by us in a configuration file:
 
 	Compress   Compression
 	ProxyOBFS4 string
+}
+
+// Clone returns a copy of the passed options. If the passed options
+// object is invalid, the returned one will be too.
+func (opt *OpenVPNOptions) Clone() *OpenVPNOptions {
+	return &OpenVPNOptions{
+		Remote:      opt.Remote,
+		Port:        opt.Port,
+		Proto:       opt.Proto,
+		Username:    opt.Username,
+		Password:    opt.Password,
+		CAPath:      opt.CAPath,
+		CertPath:    opt.CertPath,
+		KeyPath:     opt.KeyPath,
+		TLSAuthPath: opt.TLSAuthPath,
+		CA:          opt.CA,
+		Cert:        opt.Cert,
+		Key:         opt.Key,
+		TLSAuth:     opt.TLSAuth,
+		Cipher:      opt.Cipher,
+		Auth:        opt.Auth,
+		TLSMaxVer:   opt.TLSMaxVer,
+		Compress:    opt.Compress,
+		ProxyOBFS4:  opt.ProxyOBFS4,
+	}
+}
+
+// Merge will make a copy of the source object, and then proceed to override any field
+// that has the zero value in the source with the field value in target. It returns a pointer
+// to the merged [OpenVPNOptions] object.
+func (opt *OpenVPNOptions) Merge(target *OpenVPNOptions) *OpenVPNOptions {
+	opts := opt.Clone()
+
+	sourceValue := reflect.ValueOf(opts).Elem()
+	targetValue := reflect.ValueOf(target).Elem()
+
+	for i := 0; i < sourceValue.NumField(); i++ {
+		sourceFieldValue := sourceValue.Field(i)
+
+		// if source has the zero value for its type, replace it with the target field value.
+		if reflect.DeepEqual(reflect.Zero(sourceFieldValue.Type()).Interface(), sourceFieldValue.Interface()) {
+			targetFieldValue := targetValue.Field(i)
+			sourceValue.Field(i).Set(targetFieldValue)
+		}
+	}
+	return opts
+
 }
 
 // ReadConfigFile expects a string with a path to a valid config file,
@@ -200,6 +250,7 @@ func parseProto(p []string, o *OpenVPNOptions) (*OpenVPNOptions, error) {
 }
 
 func parseRemote(p []string, o *OpenVPNOptions) (*OpenVPNOptions, error) {
+	// TODO(ainhazal): clone and modify
 	if len(p) != 2 {
 		return o, fmt.Errorf("%w: %s", ErrBadConfig, "remote needs two args")
 	}
@@ -208,6 +259,7 @@ func parseRemote(p []string, o *OpenVPNOptions) (*OpenVPNOptions, error) {
 }
 
 func parseCipher(p []string, o *OpenVPNOptions) (*OpenVPNOptions, error) {
+	// TODO(ainhazal): clone and modify
 	if len(p) != 1 {
 		return o, fmt.Errorf("%w: %s", ErrBadConfig, "cipher expects one arg")
 	}
@@ -220,6 +272,7 @@ func parseCipher(p []string, o *OpenVPNOptions) (*OpenVPNOptions, error) {
 }
 
 func parseAuth(p []string, o *OpenVPNOptions) (*OpenVPNOptions, error) {
+	// TODO(ainhazal): clone and modify
 	if len(p) != 1 {
 		return o, fmt.Errorf("%w: %s", ErrBadConfig, "invalid auth entry")
 	}
@@ -232,6 +285,7 @@ func parseAuth(p []string, o *OpenVPNOptions) (*OpenVPNOptions, error) {
 }
 
 func parseCA(p []string, o *OpenVPNOptions, basedir string) (*OpenVPNOptions, error) {
+	// TODO(ainhazal): clone and modify
 	e := fmt.Errorf("%w: %s", ErrBadConfig, "ca expects a valid file")
 	if len(p) != 1 {
 		return o, e
@@ -248,6 +302,7 @@ func parseCA(p []string, o *OpenVPNOptions, basedir string) (*OpenVPNOptions, er
 }
 
 func parseCert(p []string, o *OpenVPNOptions, basedir string) (*OpenVPNOptions, error) {
+	// TODO(ainhazal): clone and modify
 	e := fmt.Errorf("%w: %s", ErrBadConfig, "cert expects a valid file")
 	if len(p) != 1 {
 		return o, e
@@ -264,6 +319,7 @@ func parseCert(p []string, o *OpenVPNOptions, basedir string) (*OpenVPNOptions, 
 }
 
 func parseKey(p []string, o *OpenVPNOptions, basedir string) (*OpenVPNOptions, error) {
+	// TODO(ainhazal): clone and modify
 	e := fmt.Errorf("%w: %s", ErrBadConfig, "key expects a valid file")
 	if len(p) != 1 {
 		return o, e
@@ -279,10 +335,28 @@ func parseKey(p []string, o *OpenVPNOptions, basedir string) (*OpenVPNOptions, e
 	return o, nil
 }
 
+func parseTLSAuth(p []string, o *OpenVPNOptions, basedir string) (*OpenVPNOptions, error) {
+	// TODO(ainhazal): clone and modify
+	e := fmt.Errorf("%w: %s", ErrBadConfig, "tls-auth expects a valid file")
+	if len(p) != 1 {
+		return o, e
+	}
+	ta := toAbs(p[0], basedir)
+	if sub, _ := isSubdir(basedir, ta); !sub {
+		return o, fmt.Errorf("%w: %s", ErrBadConfig, "tls-auth must be below config path")
+	}
+	if !existsFile(ta) {
+		return o, e
+	}
+	o.TLSAuthPath = ta
+	return o, nil
+}
+
 // parseAuthUser reads credentials from a given file, according to the openvpn
 // format (user and pass on a line each). To avoid path traversal / LFI, the
 // credentials file is expected to be in a subdirectory of the base dir.
 func parseAuthUser(p []string, o *OpenVPNOptions, basedir string) (*OpenVPNOptions, error) {
+	// TODO(ainhazal): clone and modify
 	e := fmt.Errorf("%w: %s", ErrBadConfig, "auth-user-pass expects a valid file")
 	if len(p) != 1 {
 		return o, e
@@ -303,6 +377,7 @@ func parseAuthUser(p []string, o *OpenVPNOptions, basedir string) (*OpenVPNOptio
 }
 
 func parseCompress(p []string, o *OpenVPNOptions) (*OpenVPNOptions, error) {
+	// TODO(ainhazal): clone and modify
 	if len(p) > 1 {
 		return o, fmt.Errorf("%w: %s", ErrBadConfig, "compress: only empty/stub options supported")
 	}
@@ -318,6 +393,7 @@ func parseCompress(p []string, o *OpenVPNOptions) (*OpenVPNOptions, error) {
 }
 
 func parseCompLZO(p []string, o *OpenVPNOptions) (*OpenVPNOptions, error) {
+	// TODO(ainhazal): clone and modify
 	if p[0] != "no" {
 		return o, fmt.Errorf("%w: %s", ErrBadConfig, "comp-lzo: compression not supported")
 	}
@@ -328,6 +404,7 @@ func parseCompLZO(p []string, o *OpenVPNOptions) (*OpenVPNOptions, error) {
 // parseTLSVerMax sets the maximum TLS version. This is currently ignored
 // because we're using uTLS to parrot the Client Hello.
 func parseTLSVerMax(p []string, o *OpenVPNOptions) (*OpenVPNOptions, error) {
+	// TODO(ainhazal): clone and modify
 	if len(p) == 0 {
 		o.TLSMaxVer = "1.3"
 		return o, nil
@@ -362,6 +439,7 @@ var pMapDir = map[string]interface{}{
 	"ca":             parseCA,
 	"cert":           parseCert,
 	"key":            parseKey,
+	"tls-auth":       parseTLSAuth,
 	"auth-user-pass": parseAuthUser,
 }
 
@@ -372,7 +450,7 @@ func parseOption(opt *OpenVPNOptions, dir, key string, p []string, lineno int) (
 		if updatedOpt, e := fn(p, opt); e != nil {
 			return updatedOpt, e
 		}
-	case "ca", "cert", "key", "auth-user-pass":
+	case "ca", "cert", "key", "tls-auth", "auth-user-pass":
 		fn := pMapDir[key].(func([]string, *OpenVPNOptions, string) (*OpenVPNOptions, error))
 		if updatedOpt, e := fn(p, opt, dir); e != nil {
 			return updatedOpt, e
@@ -471,7 +549,7 @@ func getOptionsFromLines(lines []string, dir string) (*OpenVPNOptions, error) {
 
 func isOpeningTag(key string) bool {
 	switch key {
-	case "<ca>", "<cert>", "<key>":
+	case "<ca>", "<cert>", "<key>", "<tls-auth>":
 		return true
 	default:
 		return false
@@ -480,7 +558,7 @@ func isOpeningTag(key string) bool {
 
 func isClosingTag(key string) bool {
 	switch key {
-	case "</ca>", "</cert>", "</key>":
+	case "</ca>", "</cert>", "</key>", "</tls-auth>":
 		return true
 	default:
 		return false
@@ -495,6 +573,8 @@ func parseTag(tag string) string {
 		return "cert"
 	case "<key>", "</key>":
 		return "key"
+	case "<tls-auth>", "</tls-auth>":
+		return "tls-auth"
 	default:
 		return ""
 	}
@@ -513,6 +593,8 @@ func parseInlineTag(o *OpenVPNOptions, tag string, buf *bytes.Buffer) error {
 		o.Cert = b
 	case "key":
 		o.Key = b
+	case "tls-auth":
+		o.TLSAuth = b
 	default:
 		return fmt.Errorf("%w: unknown tag: %s", ErrBadConfig, tag)
 	}
