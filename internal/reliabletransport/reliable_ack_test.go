@@ -19,9 +19,8 @@ import (
    └─┬──┘   └──▲─┘
      │         │
      │         │
-     │         │
-     ▼       send
-    ack
+     ▼         |
+    ack      send
 */
 func TestReliable_ACK(t *testing.T) {
 	if testing.Verbose() {
@@ -129,7 +128,8 @@ func TestReliable_ACK(t *testing.T) {
 			t0 := time.Now()
 
 			// let the workers pump up the jam!
-			s.StartWorkers(config.NewConfig(config.WithLogger(log.Log)), workers, session)
+			cfg, _ := config.NewConfig(config.WithLogger(log.Log))
+			s.StartWorkers(cfg, workers, session)
 
 			writer := vpntest.NewPacketWriter(dataIn)
 

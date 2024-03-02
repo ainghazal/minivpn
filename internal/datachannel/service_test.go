@@ -27,7 +27,8 @@ func TestService_StartWorkers(t *testing.T) {
 	session := makeTestingSession()
 
 	opts := makeTestingOptions(t, "AES-128-GCM", "sha512")
-	s.StartWorkers(config.NewConfig(config.WithOpenVPNOptions(opts)), workers, session)
+	cfg, _ := config.NewConfig(config.WithOpenVPNOptions(opts))
+	s.StartWorkers(cfg, workers, session)
 
 	keyReady <- makeTestingDataChannelKey()
 	<-session.Ready

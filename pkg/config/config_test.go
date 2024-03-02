@@ -11,7 +11,7 @@ import (
 
 func TestNewConfig(t *testing.T) {
 	t.Run("default constructor does not fail", func(t *testing.T) {
-		c := NewConfig()
+		c, _ := NewConfig()
 		if c.logger == nil {
 			t.Errorf("logger should not be nil")
 		}
@@ -21,14 +21,14 @@ func TestNewConfig(t *testing.T) {
 	})
 	t.Run("WithLogger sets the logger", func(t *testing.T) {
 		testLogger := model.NewTestLogger()
-		c := NewConfig(WithLogger(testLogger))
+		c, _ := NewConfig(WithLogger(testLogger))
 		if c.Logger() != testLogger {
 			t.Errorf("expected logger to be set to the configured one")
 		}
 	})
 	t.Run("WithTracer sets the tracer", func(t *testing.T) {
 		testTracer := model.HandshakeTracer(model.DummyTracer{})
-		c := NewConfig(WithHandshakeTracer(testTracer))
+		c, _ := NewConfig(WithHandshakeTracer(testTracer))
 		if c.Tracer() != testTracer {
 			t.Errorf("expected tracer to be set to the configured one")
 		}
@@ -36,7 +36,7 @@ func TestNewConfig(t *testing.T) {
 
 	t.Run("WithConfigFile sets OpenVPNOptions after parsing the configured file", func(t *testing.T) {
 		configFile := writeValidConfigFile(t.TempDir())
-		c := NewConfig(WithConfigFile(configFile))
+		c, _ := NewConfig(WithConfigFile(configFile))
 		opts := c.OpenVPNOptions()
 		if opts.Proto.String() != "udp" {
 			t.Error("expected proto udp")

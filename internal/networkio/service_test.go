@@ -42,10 +42,10 @@ func TestService_StartStopWorkers(t *testing.T) {
 		NetworkToMuxer: &networkToMuxer,
 	}
 
-	s.StartWorkers(config.NewConfig(config.WithLogger(log.Log)), workersManager, framingConn)
+	cfg, _ := config.NewConfig(config.WithLogger(log.Log))
+	s.StartWorkers(cfg, workersManager, framingConn)
 	got := <-networkToMuxer
 
-	//time.Sleep(time.Millisecond * 10)
 	workersManager.StartShutdown()
 	workersManager.WaitWorkersShutdown()
 

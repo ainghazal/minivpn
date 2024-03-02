@@ -8,7 +8,8 @@ import (
 )
 
 func makeTestingSession() *session.Manager {
-	manager, err := session.NewManager(config.NewConfig())
+	cfg, _ := config.NewConfig()
+	manager, err := session.NewManager(cfg)
 	runtimex.PanicOnError(err, "could not get session manager")
 	manager.SetRemoteSessionID(model.SessionID{0x01})
 	return manager

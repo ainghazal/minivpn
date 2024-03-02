@@ -18,7 +18,8 @@ import (
 // initManagers initializes a workers manager and a session manager.
 func initManagers() (*workers.Manager, *session.Manager) {
 	w := workers.NewManager(log.Log)
-	s, err := session.NewManager(config.NewConfig(config.WithLogger(log.Log)))
+	cfg, _ := config.NewConfig(config.WithLogger(log.Log))
+	s, err := session.NewManager(cfg)
 	runtimex.PanicOnError(err, "cannot create session manager")
 	return w, s
 }

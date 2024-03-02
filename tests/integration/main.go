@@ -17,6 +17,7 @@ import (
 	"github.com/ooni/minivpn/extras/ping"
 	"github.com/ooni/minivpn/internal/networkio"
 	"github.com/ooni/minivpn/internal/tun"
+	"github.com/ooni/minivpn/pkg/config"
 )
 
 const (
@@ -117,7 +118,7 @@ func main() {
 	defer os.RemoveAll(tmp) // clean up
 
 	fmt.Println("launching docker")
-	config, pool, resource, err := launchDocker("AES-256-GCM", "SHA256")
+	configInfo, pool, resource, err := launchDocker("AES-256-GCM", "SHA256")
 	if err != nil {
 		log.WithError(err).Fatal("cannot start docker")
 	}
@@ -131,12 +132,12 @@ func main() {
 	defer cfgFile.Close()
 	fmt.Println("Config written to: " + cfgFile.Name())
 
-	if _, err = cfgFile.Write(config); err != nil {
+	if _, err = cfgFile.Write(configInfo); err != nil {
 		log.WithError(err).Fatal("Failed to write config to temporary file")
 	}
 
 	// actual test begins
-	vpnConfig := config.NewConfig(config.WithConfigFile(cfgFile.Name()))
+	vpnConfig, err := config.NewConfig(config.WithConfigFile(cfgFile.Name()))
 
 	dialer := networkio.NewDialer(log.Log, &net.Dialer{})
 	conn, err := dialer.DialContext(context.TODO(), vpnConfig.Remote().Protocol, vpnConfig.Remote().Endpoint)

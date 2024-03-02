@@ -43,10 +43,14 @@ func TestService_StartWorkers(t *testing.T) {
 				}(),
 			},
 			args: args{
-				config:         config.NewConfig(config.WithLogger(log.Log)),
+				config: func() *config.Config {
+					cfg, _ := config.NewConfig(config.WithLogger(log.Log))
+					return cfg
+				}(),
 				workersManager: workers.NewManager(log.Log),
 				sessionManager: func() *session.Manager {
-					m, _ := session.NewManager(config.NewConfig(config.WithLogger(log.Log)))
+					cfg, _ := config.NewConfig(config.WithLogger(log.Log))
+					m, _ := session.NewManager(cfg)
 					return m
 				}(),
 			},

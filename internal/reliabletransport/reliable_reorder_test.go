@@ -124,7 +124,8 @@ func TestReliable_Reordering_UP(t *testing.T) {
 			t0 := time.Now()
 
 			// let the workers pump up the jam!
-			s.StartWorkers(config.NewConfig(config.WithLogger(log.Log)), workers, session)
+			cfg, _ := config.NewConfig(config.WithLogger(log.Log))
+			s.StartWorkers(cfg, workers, session)
 
 			writer := vpntest.NewPacketWriter(dataIn)
 			initializeSessionIDForWriter(writer, session)

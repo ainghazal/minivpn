@@ -94,7 +94,10 @@ func main() {
 	defer cancel()
 
 	// create config from the passed options
-	vpncfg := config.NewConfig(opts...)
+	vpncfg, err := config.NewConfig(opts...)
+	if err != nil {
+		log.WithError(err).Fatal("cannot parse config")
+	}
 
 	// create a vpn tun Device
 	tun, err := tunnel.Start(ctx, &net.Dialer{}, vpncfg)

@@ -1,11 +1,11 @@
 package config
 
 import (
+	"fmt"
 	"net"
 
 	"github.com/apex/log"
 	"github.com/ooni/minivpn/internal/model"
-	"github.com/ooni/minivpn/internal/runtimex"
 )
 
 // Config contains options to initialize the OpenVPN tunnel.
@@ -20,8 +20,9 @@ type Config struct {
 	tracer model.HandshakeTracer
 }
 
-// NewConfig returns a Config ready to intialize a vpn tunnel.
-func NewConfig(options ...Option) *Config {
+// NewConfig returns a Config ready to intialize a vpn tunnel. In case any error is raised during the
+// initialization, it will be returned too.
+func NewConfig(options ...Option) (*Config, error) {
 	cfg := &Config{
 		openvpnOptions: &OpenVPNOptions{},
 		logger:         log.Log,
@@ -30,16 +31,18 @@ func NewConfig(options ...Option) *Config {
 	for _, opt := range options {
 		opt(cfg)
 	}
-	return cfg
+	return cfg, nil
 }
 
-// Option is an option you can pass to initialize minivpn.
-type Option func(config *Config)
+// Option is an option you can pass to initialize minivpn. It will return any error
+// that should be propagated by the constructor.
+type Option func(config *Config) error
 
 // WithLogger configures the passed [Logger].
 func WithLogger(logger model.Logger) Option {
-	return func(config *Config) {
+	return func(config *Config) error {
 		config.logger = logger
+		return nil
 	}
 }
 
@@ -50,8 +53,9 @@ func (c *Config) Logger() model.Logger {
 
 // WithHandshakeTracer configures the passed [HandshakeTracer].
 func WithHandshakeTracer(tracer model.HandshakeTracer) Option {
-	return func(config *Config) {
+	return func(config *Config) error {
 		config.tracer = tracer
+		return nil
 	}
 }
 
@@ -62,18 +66,24 @@ func (c *Config) Tracer() model.HandshakeTracer {
 
 // WithConfigFile configures OpenVPNOptions parsed from the given file.
 func WithConfigFile(configPath string) Option {
-	return func(config *Config) {
+	return func(config *Config) error {
 		openvpnOpts, err := ReadConfigFile(configPath)
-		runtimex.PanicOnError(err, "cannot parse config file")
-		runtimex.PanicIfFalse(openvpnOpts.HasAuthInfo(), "missing auth info")
+		if err != nil {
+			return err
+		}
+		if !openvpnOpts.HasAuthInfo() {
+			return fmt.Errorf("%w: %s", ErrBadConfig, "missing auth info")
+		}
 		config.openvpnOptions = openvpnOpts
+		return nil
 	}
 }
 
 // WithOpenVPNOptions configures the passed OpenVPN options.
 func WithOpenVPNOptions(openvpnOptions *OpenVPNOptions) Option {
-	return func(config *Config) {
+	return func(config *Config) error {
 		config.openvpnOptions = openvpnOptions
+		return nil
 	}
 }
 
