@@ -55,17 +55,19 @@ func (s *Service) StartWorkers(
 	workersManager *workers.Manager,
 	sessionManager *session.Manager,
 ) {
+	// we initialize the ticker for hard reset retries to a sufficiently long time from now
+	hardResetTicker := time.NewTicker(longWakeup)
 	ws := &workersState{
-		logger:    config.Logger(),
-		hardReset: s.HardReset,
-		// initialize to a sufficiently long time from now
-		hardResetTicker:      time.NewTicker(longWakeup),
+		logger:               config.Logger(),
+		hardReset:            s.HardReset,
+		hardResetTicker:      hardResetTicker,
 		notifyTLS:            *s.NotifyTLS,
 		dataOrControlToMuxer: s.DataOrControlToMuxer,
 		muxerToReliable:      *s.MuxerToReliable,
 		muxerToData:          *s.MuxerToData,
 		muxerToNetwork:       *s.MuxerToNetwork,
 		networkToMuxer:       s.NetworkToMuxer,
+		openVPNOptions:       config.OpenVPNOptions(),
 		sessionManager:       sessionManager,
 		tracer:               config.Tracer(),
 		workersManager:       workersManager,
@@ -76,8 +78,8 @@ func (s *Service) StartWorkers(
 
 // workersState contains the reliabletransport workers state.
 type workersState struct {
-	// logger is the logger to use
-	logger model.Logger
+	// dataOrControlToMuxer is the channel for reading all the packets traveling down the stack.
+	dataOrControlToMuxer <-chan *model.Packet
 
 	// hardReset is the channel posted to force a hard reset.
 	hardReset <-chan any
@@ -88,11 +90,11 @@ type workersState struct {
 	// hardResetTicker is a channel to retry the initial send of hard reset packet.
 	hardResetTicker *time.Ticker
 
+	// logger is the logger to use
+	logger model.Logger
+
 	// notifyTLS is used to send notifications to the TLS service.
 	notifyTLS chan<- *model.Notification
-
-	// dataOrControlToMuxer is the channel for reading all the packets traveling down the stack.
-	dataOrControlToMuxer <-chan *model.Packet
 
 	// muxerToReliable is the channel for writing control packets going up the stack.
 	muxerToReliable chan<- *model.Packet
@@ -105,6 +107,9 @@ type workersState struct {
 
 	// networkToMuxer is the channel for reading raw packets going up the stack.
 	networkToMuxer <-chan []byte
+
+	// openVPNOptions contains the configured protocol options.
+	openVPNOptions *config.OpenVPNOptions
 
 	// sessionManager manages the OpenVPN session.
 	sessionManager *session.Manager
@@ -217,9 +222,14 @@ func (ws *workersState) startHardReset() error {
 // handleRawPacket is the code invoked to handle a raw packet.
 func (ws *workersState) handleRawPacket(rawPacket []byte) error {
 	// make sense of the packet
-	packet, err := model.ParsePacket(rawPacket)
+	packet, err := model.ParsePacket(rawPacket, ws.openVPNOptions.ShouldDoTLSAuth())
 	if err != nil {
 		ws.logger.Warnf("packetmuxer: moveUpWorker: ParsePacket: %s", err.Error())
+		// TODO(ainghazal): add reason
+		ws.tracer.OnDroppedPacket(
+			model.DirectionIncoming,
+			ws.sessionManager.NegotiationState(),
+			&model.Packet{Payload: rawPacket})
 		return nil // keep running
 	}
 

@@ -66,6 +66,7 @@ func loadCertAndCAFromPath(pth certPaths) (*certConfig, error) {
 	}
 
 	cfg := &certConfig{ca: ca}
+
 	if pth.certPath != "" && pth.keyPath != "" {
 		cert, err := tls.LoadX509KeyPair(pth.certPath, pth.keyPath)
 		if err != nil {
@@ -93,7 +94,8 @@ func loadCertAndCAFromBytes(crt certBytes) (*certConfig, error) {
 		return nil, fmt.Errorf("%w: %s", ErrBadCA, "cannot parse ca cert")
 	}
 	cfg := &certConfig{ca: ca}
-	if crt.cert != nil && crt.key != nil {
+
+	if len(crt.cert) != 0 && len(crt.key) != 0 {
 		cert, err := tls.X509KeyPair(crt.cert, crt.key)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %s", ErrBadKeypair, err)
@@ -159,21 +161,21 @@ func customVerifyFactory(pinner authorityPinner) verifyFun {
 	// setting InsecureSkipVerify, [...] then this callback will be considered but
 	// the verifiedChains argument will always be nil.
 	customVerify := func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
-		// we assume (from docs) that we're always given the
-		// leaf certificate as the first cert in the array.
-		leaf, _ := x509.ParseCertificate(rawCerts[0])
-		if leaf == nil {
-			return fmt.Errorf("%w: %s", ErrCannotVerifyCertChain, "nothing to verify")
-		}
-		// By default has DNSName verification disabled.
-		opts := certVerifyOptions()
-		// Set the configured CA(s) as the certificate pool to verify against.
-		opts.Roots = pinner.authority()
+		for _, cert := range rawCerts {
+			leaf, _ := x509.ParseCertificate(cert)
+			if leaf == nil {
+				continue
+			}
+			// By default has DNSName verification disabled.
+			opts := certVerifyOptions()
+			// Set the configured CA(s) as the certificate pool to verify against.
+			opts.Roots = pinner.authority()
 
-		if _, err := leaf.Verify(opts); err != nil {
-			return fmt.Errorf("%w: %s", ErrCannotVerifyCertChain, err)
+			if _, err := leaf.Verify(opts); err == nil {
+				return nil
+			}
 		}
-		return nil
+		return fmt.Errorf("%w: could not verify any of %d raw certs", ErrCannotVerifyCertChain, len(rawCerts))
 	}
 	return customVerify
 }

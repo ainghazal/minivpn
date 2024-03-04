@@ -25,6 +25,7 @@ type Manager struct {
 	logger               model.Logger
 	mu                   sync.Mutex
 	negState             model.NegotiationState
+	openvpnOptions       *config.OpenVPNOptions
 	remoteSessionID      optional.Value[model.SessionID]
 	tunnelInfo           model.TunnelInfo
 	tracer               model.HandshakeTracer
@@ -46,6 +47,7 @@ func NewManager(config *config.Config) (*Manager, error) {
 		logger:               config.Logger(),
 		mu:                   sync.Mutex{},
 		negState:             0,
+		openvpnOptions:       config.OpenVPNOptions(),
 		remoteSessionID:      optional.None[model.SessionID](),
 		tunnelInfo:           model.TunnelInfo{},
 		tracer:               config.Tracer(),
@@ -119,10 +121,12 @@ func (m *Manager) NewACKForPacketIDs(ids []model.PacketID) (*model.Packet, error
 		PeerID:          [3]byte{},
 		LocalSessionID:  m.localSessionID,
 		ACKs:            ids,
-		RemoteSessionID: m.remoteSessionID.Unwrap(),
 		ID:              0,
+		RemoteSessionID: m.remoteSessionID.Unwrap(),
 		Payload:         []byte{},
+		TLSAuth:         m.openvpnOptions.ShouldDoTLSAuth(),
 	}
+	p.SetTLSAuthKey(m.openvpnOptions.TLSAuth)
 	return p, nil
 }
 
@@ -150,6 +154,14 @@ func (m *Manager) NewPacket(opcode model.Opcode, payload []byte) (*model.Packet,
 	if !m.remoteSessionID.IsNone() {
 		packet.RemoteSessionID = m.remoteSessionID.Unwrap()
 	}
+
+	// do we need to use tls-auth for control packets?
+	if opcode.IsControl() {
+		// TODO: convert TLSAuth to func() bool
+		packet.TLSAuth = m.openvpnOptions.ShouldDoTLSAuth()
+		packet.SetTLSAuthKey(m.openvpnOptions.TLSAuth)
+	}
+
 	return packet, nil
 }
 
@@ -167,6 +179,12 @@ func (m *Manager) NewHardResetPacket() *model.Packet {
 	// a hard reset will always have packet ID zero
 	packet.ID = 0
 	copy(packet.LocalSessionID[:], m.localSessionID[:])
+
+	// do we need to use tls-auth for control packets?
+	// TODO: factor out to maybeAddTLSAuth ------------
+	packet.TLSAuth = m.openvpnOptions.ShouldDoTLSAuth()
+	packet.SetTLSAuthKey(m.openvpnOptions.TLSAuth)
+
 	return packet
 }
 

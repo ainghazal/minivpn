@@ -32,6 +32,11 @@ func encodeClientControlMessageAsBytes(k *session.KeySource, o *config.OpenVPNOp
 	if err != nil {
 		return nil, err
 	}
+
+	fmt.Println("SENDING KEY MATERIAL...")
+	fmt.Println(">>> username", o.Username)
+	fmt.Println(">>> password", o.Password)
+
 	user, err := bytesx.EncodeOptionStringToBytes(string(o.Username))
 	if err != nil {
 		return nil, err

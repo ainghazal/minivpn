@@ -8,12 +8,17 @@ package model
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha512"
 	"errors"
 	"fmt"
 	"io"
 	"math"
+	"sync"
+	"time"
 
 	"github.com/ooni/minivpn/internal/bytesx"
+	"github.com/ooni/minivpn/internal/runtimex"
 )
 
 // Opcode is an OpenVPN packet opcode.
@@ -160,6 +165,21 @@ type Packet struct {
 
 	// Payload is the packet's payload.
 	Payload []byte
+
+	// TLSAuth marks whether to use control packet authentication (tls-auth)
+	TLSAuth bool
+
+	// tlsAuthKey is the key used for tls-auth.
+	tlsAuthKey []byte
+
+	once sync.Once
+}
+
+// SetTLSAuthKey sets the key used for TLS Authentication.
+func (p *Packet) SetTLSAuthKey(key []byte) {
+	p.once.Do(func() {
+		p.tlsAuthKey = key
+	})
 }
 
 // ErrPacketTooShort indicates that a packet is too short.
@@ -167,12 +187,20 @@ var ErrPacketTooShort = errors.New("openvpn: packet too short")
 
 // ParsePacket produces a packet after parsing the common header. We assume that
 // the underlying connection has already stripped out the framing.
-func ParsePacket(buf []byte) (*Packet, error) {
+// If the tlsAuth parameter is true, we will attempt to authenticate the HMAC.
+// TODO(ainghazal): parse authConfig struct around with key
+func ParsePacket(buf []byte, tlsAuth bool) (*Packet, error) {
 	// a valid packet is larger, but this allows us
 	// to keep parsing a non-data packet.
 	if len(buf) < 2 {
 		return nil, ErrPacketTooShort
 	}
+
+	/*
+		fmt.Println("PACKET")
+		fmt.Println(hex.Dump(buf))
+	*/
+
 	// parsing opcode and keyID
 	opcode := Opcode(buf[0] >> 3)
 	keyID := buf[0] & 0x07
@@ -195,7 +223,7 @@ func ParsePacket(buf []byte) (*Packet, error) {
 
 	// ACKs and control packets require more complex parsing
 	if opcode.IsControl() || opcode == P_ACK_V1 {
-		return parseControlOrACKPacket(opcode, keyID, payload)
+		return parseControlOrACKPacket(opcode, keyID, payload, tlsAuth)
 	}
 
 	// otherwise just return the data packet.
@@ -208,6 +236,7 @@ func ParsePacket(buf []byte) (*Packet, error) {
 		RemoteSessionID: [8]byte{},
 		ID:              0,
 		Payload:         payload,
+		once:            sync.Once{},
 	}
 	return p, nil
 }
@@ -233,7 +262,7 @@ var ErrEmptyPayload = errors.New("openvpn: empty payload")
 var ErrParsePacket = errors.New("openvpn: packet parse error")
 
 // parseControlOrACKPacket parses the contents of a control or ACK packet.
-func parseControlOrACKPacket(opcode Opcode, keyID byte, payload []byte) (*Packet, error) {
+func parseControlOrACKPacket(opcode Opcode, keyID byte, payload []byte, tlsAuth bool) (*Packet, error) {
 	// make sure we have payload to parse and we're parsing control or ACK
 	if len(payload) <= 0 {
 		return nil, ErrEmptyPayload
@@ -251,38 +280,99 @@ func parseControlOrACKPacket(opcode Opcode, keyID byte, payload []byte) (*Packet
 	if _, err := io.ReadFull(buf, p.LocalSessionID[:]); err != nil {
 		return p, fmt.Errorf("%w: bad sessionID: %s", ErrParsePacket, err)
 	}
+	// fmt.Printf("LOCAL PSID: %x\n", p.LocalSessionID)
 
-	// ack array length
-	ackArrayLenByte, err := buf.ReadByte()
-	if err != nil {
-		return p, fmt.Errorf("%w: bad ack: %s", ErrParsePacket, err)
-	}
-	ackArrayLen := int(ackArrayLenByte)
-
-	// ack array
-	p.ACKs = make([]PacketID, ackArrayLen)
-	for i := 0; i < ackArrayLen; i++ {
-		val, err := bytesx.ReadUint32(buf)
+	if tlsAuth {
+		packetHMAC := make([]byte, 64)
+		_, err := buf.Read(packetHMAC)
 		if err != nil {
-			return p, fmt.Errorf("%w: cannot parse ack id: %s", ErrParsePacket, err)
+			return p, fmt.Errorf("%w: cannot parse HMAC: %s", ErrParsePacket, err)
 		}
-		p.ACKs[i] = PacketID(val)
-	}
 
-	// remote session id
-	if ackArrayLen > 0 {
-		if _, err = io.ReadFull(buf, p.RemoteSessionID[:]); err != nil {
-			return p, fmt.Errorf("%w: bad remote sessionID: %s", ErrParsePacket, err)
-		}
-	}
+		// TODO(ainghazal): calculate HMAC and abort if it does not match.
+		fmt.Printf("HMAC: %x\n", packetHMAC)
 
-	// packet id
-	if p.Opcode != P_ACK_V1 {
 		val, err := bytesx.ReadUint32(buf)
 		if err != nil {
 			return p, fmt.Errorf("%w: bad packetID: %s", ErrParsePacket, err)
 		}
 		p.ID = PacketID(val)
+
+		netTime := make([]byte, 4)
+		_, err = buf.Read(netTime)
+		if err != nil {
+			return p, fmt.Errorf("%w: cannot parse net time: %s", ErrParsePacket, err)
+		}
+
+		ackArrayLenByte, err := buf.ReadByte()
+		if err != nil {
+			return p, fmt.Errorf("%w: bad ack: %s", ErrParsePacket, err)
+		}
+		ackArrayLen := int(ackArrayLenByte)
+
+		// ack array
+		p.ACKs = make([]PacketID, ackArrayLen)
+		for i := 0; i < ackArrayLen; i++ {
+			val, err := bytesx.ReadUint32(buf)
+			if err != nil {
+				return p, fmt.Errorf("%w: cannot parse ack id: %s", ErrParsePacket, err)
+			}
+			p.ACKs[i] = PacketID(val)
+		}
+
+		fmt.Println("ACKS:", p.ACKs)
+
+		// remote session id
+		if ackArrayLen > 0 {
+			if _, err = io.ReadFull(buf, p.RemoteSessionID[:]); err != nil {
+				return p, fmt.Errorf("%w: bad remote sessionID: %s", ErrParsePacket, err)
+			}
+		}
+
+		if p.Opcode != P_ACK_V1 {
+			val, err := bytesx.ReadUint32(buf)
+			if err != nil {
+				return p, fmt.Errorf("%w: bad packetID: %s", ErrParsePacket, err)
+			}
+			p.ID = PacketID(val)
+		}
+
+	} else {
+
+		// ack array length
+		ackArrayLenByte, err := buf.ReadByte()
+		if err != nil {
+			return p, fmt.Errorf("%w: bad ack: %s", ErrParsePacket, err)
+		}
+		ackArrayLen := int(ackArrayLenByte)
+
+		// ack array
+		p.ACKs = make([]PacketID, ackArrayLen)
+		for i := 0; i < ackArrayLen; i++ {
+			val, err := bytesx.ReadUint32(buf)
+			if err != nil {
+				return p, fmt.Errorf("%w: cannot parse ack id: %s", ErrParsePacket, err)
+			}
+			p.ACKs[i] = PacketID(val)
+		}
+
+		// remote session id
+		if ackArrayLen > 0 {
+			if _, err = io.ReadFull(buf, p.RemoteSessionID[:]); err != nil {
+				return p, fmt.Errorf("%w: bad remote sessionID: %s", ErrParsePacket, err)
+			}
+		}
+
+		// packet id
+		if p.Opcode != P_ACK_V1 {
+			val, err := bytesx.ReadUint32(buf)
+			if err != nil {
+				return p, fmt.Errorf("%w: bad packetID: %s", ErrParsePacket, err)
+			}
+			p.ID = PacketID(val)
+			fmt.Println("PACKET ID =>", p.ID)
+		}
+
 	}
 
 	// payload
@@ -292,6 +382,78 @@ func parseControlOrACKPacket(opcode Opcode, keyID byte, payload []byte) (*Packet
 
 // ErrMarshalPacket is the error returned when we cannot marshal a packet.
 var ErrMarshalPacket = errors.New("cannot marshal packet")
+
+// controlPacketHeader writes the following information to the returned buffer:
+//   - NO: packet-id for replay protection (4 or 8 bytes, includes
+//     sequence number and optional time_t timestamp).
+//   - P_ACK packet_id array length (1 byte).
+//   - P_ACK packet-id array (if length > 0).
+//   - P_ACK remote session_id (if length > 0).
+//   - message packet-id (4 bytes).
+//     TODO rename this to L3 part
+func (p *Packet) controlPacketHeader(t time.Time) ([]byte, error) {
+	buf := &bytes.Buffer{}
+	// original code below -------------------
+	// we write a byte with the number of acks, and then serialize each ack.
+	nAcks := len(p.ACKs)
+	if nAcks > math.MaxUint8 {
+		return []byte{}, fmt.Errorf("too many ACKs")
+	}
+	buf.WriteByte(byte(nAcks))
+	for i := 0; i < nAcks; i++ {
+		bytesx.WriteUint32(buf, uint32(p.ACKs[i]))
+	}
+	// remote session id
+	if len(p.ACKs) > 0 {
+		buf.Write(p.RemoteSessionID[:])
+	}
+	if p.Opcode != P_ACK_V1 {
+		bytesx.WriteUint32(buf, uint32(p.ID))
+	}
+	return buf.Bytes(), nil
+}
+
+// authenticateControlPacket returns the HMAC of the control packet encapsulation header, consisting of the
+// following data:
+//   - packet-id for replay protection (4 or 8 bytes, includes
+//     sequence number and optional time_t timestamp).
+//   - P_ACK packet_id array length (1 byte).
+//   - P_ACK packet-id array (if length > 0).
+//   - P_ACK remote session_id (if length > 0).
+//   - message packet-id (4 bytes).
+func (p *Packet) authenticateControlPacket(l3 []byte, header []byte) []byte {
+	// TODO(ainghazal): get the hmac function (on packet constructor, sha512 is hardcoded)
+	// TODO(ainghazal): honor key direction
+
+	runtimex.Assert(len(p.tlsAuthKey) != 0, "tls auth key not initialized")
+	buf := &bytes.Buffer{}
+
+	// First, write L3 to the HMAC buffer
+	buf.Write(l3)
+
+	// Second,write L1
+	// where L1 = [OP] + [PSID]
+	// (opcode compose + local session id)
+	buf.WriteByte((byte(p.Opcode) << 3) | (p.KeyID & 0x07))
+	buf.Write(p.LocalSessionID[:])
+
+	// Third, write rest
+	buf.Write(header)
+	buf.Write(p.Payload)
+
+	/*
+		fmt.Println()
+		fmt.Printf("rest: %x\n", header)
+		fmt.Printf("payload: %x\n", p.Payload)
+		fmt.Println()
+	*/
+
+	// we use the last 64 bytes from the static key to authenticate outgoing packets.
+	hmacKey := p.tlsAuthKey[len(p.tlsAuthKey)-64:]
+	hmacHash := hmac.New(sha512.New, hmacKey)
+	hmacHash.Write(buf.Bytes())
+	return hmacHash.Sum(nil)
+}
 
 // Bytes returns a byte array that is ready to be sent on the wire.
 func (p *Packet) Bytes() ([]byte, error) {
@@ -305,25 +467,33 @@ func (p *Packet) Bytes() ([]byte, error) {
 	default:
 		buf.WriteByte((byte(p.Opcode) << 3) | (p.KeyID & 0x07))
 		buf.Write(p.LocalSessionID[:])
-		// we write a byte with the number of acks, and then serialize each ack.
-		nAcks := len(p.ACKs)
-		if nAcks > math.MaxUint8 {
-			return nil, fmt.Errorf("%w: too many ACKs", ErrMarshalPacket)
+
+		ts := time.Now()
+
+		hdr, err := p.controlPacketHeader(ts)
+		if err != nil {
+			return []byte{}, fmt.Errorf("%w: err", ErrMarshalPacket)
 		}
-		buf.WriteByte(byte(nAcks))
-		for i := 0; i < nAcks; i++ {
-			bytesx.WriteUint32(buf, uint32(p.ACKs[i]))
+		if p.TLSAuth {
+			l3 := &bytes.Buffer{}
+			// L3 is the packet ID + timestamp
+			bytesx.WriteUint32(l3, uint32(p.ID+1))
+			bytesx.WriteUint32(l3, uint32(ts.Unix()))
+
+			// authenticate the packet ID preamble and the rest of the packet header
+			// plus any packet payload.
+			auth := p.authenticateControlPacket(l3.Bytes(), hdr)
+
+			// the HMAC comes after L1
+			// [L1] [L2=HMAC] [L3]
+			buf.Write(auth)
+			buf.Write(l3.Bytes())
 		}
-		// remote session id
-		if len(p.ACKs) > 0 {
-			buf.Write(p.RemoteSessionID[:])
-		}
-		if p.Opcode != P_ACK_V1 {
-			bytesx.WriteUint32(buf, uint32(p.ID))
-		}
+		buf.Write(hdr)
 	}
 	//  payload
 	buf.Write(p.Payload)
+
 	return buf.Bytes(), nil
 }
 

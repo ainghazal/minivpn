@@ -60,7 +60,7 @@ func (ws *workersState) moveUpWorker() {
 
 			if inserted := receiver.MaybeInsertIncoming(packet); !inserted {
 				// this packet was not inserted in the queue: we drop it
-				// TODO: add reason
+				// TODO(ainghazal): add reason
 				ws.tracer.OnDroppedPacket(
 					model.DirectionIncoming,
 					ws.sessionManager.NegotiationState(),

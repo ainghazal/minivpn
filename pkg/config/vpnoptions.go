@@ -31,6 +31,7 @@ package config
 import (
 	"bufio"
 	"bytes"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -199,6 +200,12 @@ func ReadConfigFile(filePath string) (*OpenVPNOptions, error) {
 // certificates from paths; false when we have inline certificates.
 func (o *OpenVPNOptions) ShouldLoadCertsFromPath() bool {
 	return o.CertPath != "" && o.KeyPath != "" && o.CAPath != ""
+}
+
+// ShouldDoTLSAuth returns true when the options object has a non-zero tls-auth key configured.
+// When parsing a config file, this means we have already parsed the OpenVPN Static Key header.
+func (o *OpenVPNOptions) ShouldDoTLSAuth() bool {
+	return len(o.TLSAuth) != 0
 }
 
 // HasAuthInfo returns true if:
@@ -370,16 +377,16 @@ func parseKey(p []string, o *OpenVPNOptions, basedir string) (*OpenVPNOptions, e
 
 func parseTLSAuth(p []string, o *OpenVPNOptions, basedir string) (*OpenVPNOptions, error) {
 	// TODO(ainhazal): clone and modify
-	e := fmt.Errorf("%w: %s", ErrBadConfig, "tls-auth expects a valid file")
+	errMsg := fmt.Errorf("%w: %s", ErrBadConfig, "tls-auth expects a valid file")
 	if len(p) != 1 {
-		return o, e
+		return o, errMsg
 	}
 	ta := toAbs(p[0], basedir)
 	if sub, _ := isSubdir(basedir, ta); !sub {
 		return o, fmt.Errorf("%w: %s", ErrBadConfig, "tls-auth must be below config path")
 	}
 	if !existsFile(ta) {
-		return o, e
+		return o, errMsg
 	}
 	o.TLSAuthPath = ta
 	return o, nil
@@ -613,6 +620,34 @@ func parseTag(tag string) string {
 	}
 }
 
+// extractTLSAuthKey attempts to extract a OpenVPN Static Key V1 in a TLS Auth block, and return any
+// error while performing the operation.
+func extractTLSAuthKey(b []byte) ([]byte, error) {
+	startTag := "-----BEGIN OpenVPN Static key V1-----"
+	endTag := "-----END OpenVPN Static key V1-----"
+
+	block := string(b)
+
+	begin := strings.Index(block, startTag)
+	end := strings.Index(block, endTag)
+
+	if begin == -1 || end == -1 || end < begin {
+		return []byte{}, fmt.Errorf("%w: %s", ErrBadConfig, "could not parse tls-auth block (bad header)")
+	}
+
+	keyHex := block[begin+len(startTag) : end]
+
+	// Remove whitespace characters
+	keyHex = strings.TrimSpace(keyHex)
+	keyHex = strings.ReplaceAll(keyHex, "\n", "")
+
+	key, err := hex.DecodeString(keyHex)
+	if err != nil {
+		return []byte{}, fmt.Errorf("%w: %s", ErrBadConfig, "could not parse tls-auth block (bad block)")
+	}
+	return key, nil
+}
+
 // parseInlineTag
 func parseInlineTag(o *OpenVPNOptions, tag string, buf *bytes.Buffer) error {
 	b := buf.Bytes()
@@ -627,7 +662,11 @@ func parseInlineTag(o *OpenVPNOptions, tag string, buf *bytes.Buffer) error {
 	case "key":
 		o.Key = b
 	case "tls-auth":
-		o.TLSAuth = b
+		ta, err := extractTLSAuthKey(b)
+		if err != nil {
+			return err
+		}
+		o.TLSAuth = ta
 	default:
 		return fmt.Errorf("%w: unknown tag: %s", ErrBadConfig, tag)
 	}
