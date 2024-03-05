@@ -57,6 +57,7 @@ func (s *Service) StartWorkers(
 ) {
 	// we initialize the ticker for hard reset retries to a sufficiently long time from now
 	hardResetTicker := time.NewTicker(longWakeup)
+
 	ws := &workersState{
 		logger:               config.Logger(),
 		hardReset:            s.HardReset,
@@ -261,7 +262,7 @@ func (ws *workersState) handleRawPacket(rawPacket []byte) error {
 				ws.logger.Warnf("packetmuxer: moveUpWorker: cannot handle data yet")
 				return errors.New("not ready to handle data")
 			}
-			ws.logger.Warnf("malformed input")
+			ws.logger.Warnf("packetmuxer: moveUpWorker: malformed input")
 			return errors.New("malformed input")
 		}
 		select {

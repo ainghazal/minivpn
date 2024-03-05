@@ -277,7 +277,6 @@ func parseControlOrACKPacket(opcode Opcode, keyID byte, payload []byte, tlsAuth 
 	}
 
 	if tlsAuth {
-		// TODO: factor out common code with case below --------------
 		packetHMAC := make([]byte, 64)
 		_, err := buf.Read(packetHMAC)
 		if err != nil {
@@ -298,74 +297,37 @@ func parseControlOrACKPacket(opcode Opcode, keyID byte, payload []byte, tlsAuth 
 		if err != nil {
 			return p, fmt.Errorf("%w: cannot parse net time: %s", ErrParsePacket, err)
 		}
+	}
 
-		ackArrayLenByte, err := buf.ReadByte()
+	ackArrayLenByte, err := buf.ReadByte()
+	if err != nil {
+		return p, fmt.Errorf("%w: bad ack: %s", ErrParsePacket, err)
+	}
+	ackArrayLen := int(ackArrayLenByte)
+
+	// ack array
+	p.ACKs = make([]PacketID, ackArrayLen)
+	for i := 0; i < ackArrayLen; i++ {
+		val, err := bytesx.ReadUint32(buf)
 		if err != nil {
-			return p, fmt.Errorf("%w: bad ack: %s", ErrParsePacket, err)
+			return p, fmt.Errorf("%w: cannot parse ack id: %s", ErrParsePacket, err)
 		}
-		ackArrayLen := int(ackArrayLenByte)
+		p.ACKs[i] = PacketID(val)
+	}
 
-		// ack array
-		p.ACKs = make([]PacketID, ackArrayLen)
-		for i := 0; i < ackArrayLen; i++ {
-			val, err := bytesx.ReadUint32(buf)
-			if err != nil {
-				return p, fmt.Errorf("%w: cannot parse ack id: %s", ErrParsePacket, err)
-			}
-			p.ACKs[i] = PacketID(val)
+	// remote session id
+	if ackArrayLen > 0 {
+		if _, err = io.ReadFull(buf, p.RemoteSessionID[:]); err != nil {
+			return p, fmt.Errorf("%w: bad remote sessionID: %s", ErrParsePacket, err)
 		}
+	}
 
-		// remote session id
-		if ackArrayLen > 0 {
-			if _, err = io.ReadFull(buf, p.RemoteSessionID[:]); err != nil {
-				return p, fmt.Errorf("%w: bad remote sessionID: %s", ErrParsePacket, err)
-			}
-		}
-
-		if p.Opcode != P_ACK_V1 {
-			val, err := bytesx.ReadUint32(buf)
-			if err != nil {
-				return p, fmt.Errorf("%w: bad packetID: %s", ErrParsePacket, err)
-			}
-			p.ID = PacketID(val)
-		}
-
-	} else {
-
-		// ack array length
-		ackArrayLenByte, err := buf.ReadByte()
+	if p.Opcode != P_ACK_V1 {
+		val, err := bytesx.ReadUint32(buf)
 		if err != nil {
-			return p, fmt.Errorf("%w: bad ack: %s", ErrParsePacket, err)
+			return p, fmt.Errorf("%w: bad packetID: %s", ErrParsePacket, err)
 		}
-		ackArrayLen := int(ackArrayLenByte)
-
-		// ack array
-		p.ACKs = make([]PacketID, ackArrayLen)
-		for i := 0; i < ackArrayLen; i++ {
-			val, err := bytesx.ReadUint32(buf)
-			if err != nil {
-				return p, fmt.Errorf("%w: cannot parse ack id: %s", ErrParsePacket, err)
-			}
-			p.ACKs[i] = PacketID(val)
-		}
-
-		// remote session id
-		if ackArrayLen > 0 {
-			if _, err = io.ReadFull(buf, p.RemoteSessionID[:]); err != nil {
-				return p, fmt.Errorf("%w: bad remote sessionID: %s", ErrParsePacket, err)
-			}
-		}
-
-		// packet id
-		if p.Opcode != P_ACK_V1 {
-			val, err := bytesx.ReadUint32(buf)
-			if err != nil {
-				return p, fmt.Errorf("%w: bad packetID: %s", ErrParsePacket, err)
-			}
-			p.ID = PacketID(val)
-			fmt.Println("PACKET ID =>", p.ID)
-		}
-
+		p.ID = PacketID(val)
 	}
 
 	// payload
