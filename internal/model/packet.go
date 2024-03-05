@@ -196,11 +196,6 @@ func ParsePacket(buf []byte, tlsAuth bool) (*Packet, error) {
 		return nil, ErrPacketTooShort
 	}
 
-	/*
-		fmt.Println("PACKET")
-		fmt.Println(hex.Dump(buf))
-	*/
-
 	// parsing opcode and keyID
 	opcode := Opcode(buf[0] >> 3)
 	keyID := buf[0] & 0x07
@@ -280,9 +275,9 @@ func parseControlOrACKPacket(opcode Opcode, keyID byte, payload []byte, tlsAuth 
 	if _, err := io.ReadFull(buf, p.LocalSessionID[:]); err != nil {
 		return p, fmt.Errorf("%w: bad sessionID: %s", ErrParsePacket, err)
 	}
-	// fmt.Printf("LOCAL PSID: %x\n", p.LocalSessionID)
 
 	if tlsAuth {
+		// TODO: factor out common code with case below --------------
 		packetHMAC := make([]byte, 64)
 		_, err := buf.Read(packetHMAC)
 		if err != nil {
@@ -319,8 +314,6 @@ func parseControlOrACKPacket(opcode Opcode, keyID byte, payload []byte, tlsAuth 
 			}
 			p.ACKs[i] = PacketID(val)
 		}
-
-		fmt.Println("ACKS:", p.ACKs)
 
 		// remote session id
 		if ackArrayLen > 0 {
@@ -383,17 +376,19 @@ func parseControlOrACKPacket(opcode Opcode, keyID byte, payload []byte, tlsAuth 
 // ErrMarshalPacket is the error returned when we cannot marshal a packet.
 var ErrMarshalPacket = errors.New("cannot marshal packet")
 
+//	TODO(ainghazal): HMAC is broken in packets we send.
+//
 // controlPacketHeader writes the following information to the returned buffer:
-//   - NO: packet-id for replay protection (4 or 8 bytes, includes
+//
+//   - ??? : packet-id for replay protection (4 or 8 bytes, includes
 //     sequence number and optional time_t timestamp).
 //   - P_ACK packet_id array length (1 byte).
 //   - P_ACK packet-id array (if length > 0).
 //   - P_ACK remote session_id (if length > 0).
 //   - message packet-id (4 bytes).
-//     TODO rename this to L3 part
 func (p *Packet) controlPacketHeader(t time.Time) ([]byte, error) {
 	buf := &bytes.Buffer{}
-	// original code below -------------------
+
 	// we write a byte with the number of acks, and then serialize each ack.
 	nAcks := len(p.ACKs)
 	if nAcks > math.MaxUint8 {
@@ -403,6 +398,7 @@ func (p *Packet) controlPacketHeader(t time.Time) ([]byte, error) {
 	for i := 0; i < nAcks; i++ {
 		bytesx.WriteUint32(buf, uint32(p.ACKs[i]))
 	}
+
 	// remote session id
 	if len(p.ACKs) > 0 {
 		buf.Write(p.RemoteSessionID[:])
@@ -413,17 +409,10 @@ func (p *Packet) controlPacketHeader(t time.Time) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// authenticateControlPacket returns the HMAC of the control packet encapsulation header, consisting of the
-// following data:
-//   - packet-id for replay protection (4 or 8 bytes, includes
-//     sequence number and optional time_t timestamp).
-//   - P_ACK packet_id array length (1 byte).
-//   - P_ACK packet-id array (if length > 0).
-//   - P_ACK remote session_id (if length > 0).
-//   - message packet-id (4 bytes).
+// authenticateControlPacket returns the HMAC of the control packet encapsulation header.
 func (p *Packet) authenticateControlPacket(l3 []byte, header []byte) []byte {
 	// TODO(ainghazal): get the hmac function (on packet constructor, sha512 is hardcoded)
-	// TODO(ainghazal): honor key direction
+	// TODO(ainghazal): honor key direction. But is the key direction being properly honored by OpenVPN??
 
 	runtimex.Assert(len(p.tlsAuthKey) != 0, "tls auth key not initialized")
 	buf := &bytes.Buffer{}
@@ -431,22 +420,14 @@ func (p *Packet) authenticateControlPacket(l3 []byte, header []byte) []byte {
 	// First, write L3 to the HMAC buffer
 	buf.Write(l3)
 
-	// Second,write L1
+	// Second,write L1 (opcode composite + packet session id)
 	// where L1 = [OP] + [PSID]
-	// (opcode compose + local session id)
 	buf.WriteByte((byte(p.Opcode) << 3) | (p.KeyID & 0x07))
 	buf.Write(p.LocalSessionID[:])
 
-	// Third, write rest
+	// Third, write the rest of data to be authenticated
 	buf.Write(header)
 	buf.Write(p.Payload)
-
-	/*
-		fmt.Println()
-		fmt.Printf("rest: %x\n", header)
-		fmt.Printf("payload: %x\n", p.Payload)
-		fmt.Println()
-	*/
 
 	// we use the last 64 bytes from the static key to authenticate outgoing packets.
 	hmacKey := p.tlsAuthKey[len(p.tlsAuthKey)-64:]
@@ -485,7 +466,7 @@ func (p *Packet) Bytes() ([]byte, error) {
 			auth := p.authenticateControlPacket(l3.Bytes(), hdr)
 
 			// the HMAC comes after L1
-			// [L1] [L2=HMAC] [L3]
+			// [L1=OP+PSID] [L2=HMAC] [L3=PID+...]
 			buf.Write(auth)
 			buf.Write(l3.Bytes())
 		}
